@@ -11,7 +11,7 @@ from decimal import Decimal
 from functools import lru_cache
 from typing import List
 
-from pydantic import field_validator, computed_field
+from pydantic import field_validator, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -84,6 +84,29 @@ class Settings(BaseSettings):
     # Logging
     # -----------------------------------------------------------------------
     log_level: str = "INFO"
+
+    # -----------------------------------------------------------------------
+    # Startup guards
+    # -----------------------------------------------------------------------
+
+    @model_validator(mode="after")
+    def _reject_insecure_secret_key_in_production(self) -> "Settings":
+        """Fail fast if SECRET_KEY is an insecure placeholder outside development."""
+        _insecure_placeholders = {
+            "INSECURE_CHANGE_ME",
+            "changeme",
+            "change_me",
+            "secret",
+            "your-secret-key",
+            "",
+        }
+        if self.app_env != "development" and self.secret_key in _insecure_placeholders:
+            raise ValueError(
+                f"SECRET_KEY is set to an insecure placeholder value while "
+                f"APP_ENV='{self.app_env}'. "
+                "Set a strong, randomly generated SECRET_KEY before deploying."
+            )
+        return self
 
     # -----------------------------------------------------------------------
     # Computed DSN properties

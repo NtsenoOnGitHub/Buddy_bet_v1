@@ -34,6 +34,7 @@ class AuthService:
     """Handles user registration and JWT-based authentication."""
 
     def __init__(self, db: AsyncSession) -> None:
+        self._db = db
         self._user_repo = UserRepository(db)
         self._wallet_repo = WalletRepository(db)
 
@@ -51,7 +52,7 @@ class AuthService:
         """
         normalised_email = request.email.lower().strip()
 
-        # Check for duplicate email
+        # Check for duplicate email (read before opening write transaction)
         existing = await self._user_repo.get_by_email(normalised_email)
         if existing is not None:
             raise ConflictError(
@@ -61,23 +62,29 @@ class AuthService:
         # Hash password — plain text never stored or logged
         password_hash = hash_password(request.password)
 
-        # Create user
-        user = await self._user_repo.create(
-            email=normalised_email,
-            display_name=request.display_name,
-            password_hash=password_hash,
-            phone_number=request.phone_number,
-        )
+        try:
+            # Create user
+            user = await self._user_repo.create(
+                email=normalised_email,
+                display_name=request.display_name,
+                password_hash=password_hash,
+                phone_number=request.phone_number,
+            )
 
-        # Create zero-balance wallet (one wallet per user)
-        await self._wallet_repo.create(
-            user_id=user.id,
-            currency=settings.platform_currency,
-        )
+            # Create zero-balance wallet (one wallet per user)
+            await self._wallet_repo.create(
+                user_id=user.id,
+                currency=settings.platform_currency,
+            )
+
+            await self._db.commit()
+        except Exception:
+            await self._db.rollback()
+            raise
 
         logger.info("New user registered: id=%s email=%s", user.id, user.email)
 
-        # Issue JWT
+        # Issue JWT — after commit so user.id is finalised
         token = create_access_token(
             user_id=user.id,
             role=user.role.value,

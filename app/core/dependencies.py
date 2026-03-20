@@ -31,18 +31,12 @@ _bearer_scheme = HTTPBearer(auto_error=False)
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Yield an async database session scoped to a single request.
 
-    The session is committed on success and rolled back on any exception.
-    Always closed at the end of the request.
+    Transaction lifecycle is owned by the service layer for write operations.
+    The session is closed (and any uncommitted transaction rolled back) when
+    the async context manager exits.
     """
     async with AsyncSessionFactory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+        yield session
 
 
 # ---------------------------------------------------------------------------
@@ -112,8 +106,10 @@ async def optional_current_user(
         payload = decode_access_token(token)
         user_id = extract_user_id(payload)
         return await _load_user(user_id, db)
-    except (UnauthorizedError, Exception):
+    except UnauthorizedError:
+        # Expected: invalid/expired token or user not found — treat as anonymous.
         return None
+    # All other exceptions (DB errors, runtime failures) propagate normally.
 
 
 # ---------------------------------------------------------------------------
