@@ -21,7 +21,7 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import InsufficientFundsError, NotFoundError
+from app.core.exceptions import InsufficientFundsError, NotFoundError, ValidationError
 from app.models.wallet import Wallet
 from app.repositories.wallet_repository import WalletRepository
 from app.schemas.wallet import WalletResponse
@@ -245,3 +245,291 @@ class WalletService:
             available_balance=available_balance,
             locked_balance=locked_balance,
         )
+
+    # -----------------------------------------------------------------------
+    # lock_funds — generic available → locked (any reference type)
+    # -----------------------------------------------------------------------
+
+    async def lock_funds(
+        self,
+        user_id: uuid.UUID,
+        amount: Decimal,
+        reference_id: uuid.UUID,
+        notes: str | None = None,
+    ) -> Wallet:
+        """Move ``amount`` from available_balance to locked_balance.
+
+        Generic counterpart to lock_stake; use this when the locking operation
+        is not directly tied to a bet (e.g. deposit hold, admin lock).
+
+        Invariants guaranteed:
+        - available_balance >= 0 after operation (raises InsufficientFundsError
+          before touching the row if the pre-check fails; verify_non_negative
+          provides a second guard after arithmetic).
+        - locked_balance >= 0 after operation (always true when adding a
+          positive amount to a non-negative value; verify_non_negative confirms).
+        - Row is acquired with SELECT FOR UPDATE before any read of balances,
+          preventing lost-update races under concurrent requests.
+        - All writes (balance update + ledger entries) are flushed inside the
+          caller's transaction — no partial state is ever committed.
+
+        Args:
+            user_id: Target user.
+            amount: Positive Decimal to move from available → locked.
+            reference_id: UUID of the entity causing the lock (bet, deposit, …).
+            notes: Optional human-readable note stored on ledger entries.
+
+        Returns:
+            Updated Wallet (flushed, not committed).
+
+        Raises:
+            InsufficientFundsError: available_balance < amount.
+            NotFoundError: Wallet does not exist for user_id.
+            ValidationError: amount is not positive.
+        """
+        if amount <= Decimal("0"):
+            raise ValidationError("lock_funds: amount must be positive.")
+
+        wallet = await self._wallet_repo.get_by_user_id_for_update(user_id)
+
+        if wallet.available_balance < amount:
+            raise InsufficientFundsError(
+                f"Insufficient available balance. "
+                f"Required: {amount}, Available: {wallet.available_balance}."
+            )
+
+        new_available = safe_subtract(wallet.available_balance, amount)
+        new_locked = safe_add(wallet.locked_balance, amount)
+
+        # Second-level guards — protect against arithmetic edge-cases.
+        verify_non_negative(new_available, "available_balance")
+        verify_non_negative(new_locked, "locked_balance")
+
+        wallet = await self._wallet_repo.update_balances(
+            wallet,
+            available_balance=new_available,
+            locked_balance=new_locked,
+        )
+
+        # Ledger: available debit + locked credit (STAKE_LOCK entry type)
+        await self._ledger.write_stake_lock(wallet, amount, reference_id, notes)
+        return wallet
+
+    # -----------------------------------------------------------------------
+    # unlock_funds — generic locked → available (any reference type)
+    # -----------------------------------------------------------------------
+
+    async def unlock_funds(
+        self,
+        user_id: uuid.UUID,
+        amount: Decimal,
+        reference_id: uuid.UUID,
+        notes: str | None = None,
+    ) -> Wallet:
+        """Move ``amount`` from locked_balance back to available_balance.
+
+        Generic counterpart to unlock_stake; use when releasing a hold that was
+        not placed via lock_stake (e.g. admin unlock, deposit release).
+
+        Invariants guaranteed:
+        - locked_balance >= 0 after operation (explicit pre-check raises
+          InsufficientFundsError; verify_non_negative is a second guard).
+        - available_balance >= 0 after operation (always true when adding to
+          a non-negative value; verify_non_negative confirms).
+        - SELECT FOR UPDATE prevents concurrent reads from seeing stale values.
+        - All writes are flushed inside the caller's transaction atomically.
+
+        Args:
+            user_id: Target user.
+            amount: Positive Decimal to move from locked → available.
+            reference_id: UUID of the entity whose hold is being released.
+            notes: Optional ledger note.
+
+        Returns:
+            Updated Wallet (flushed, not committed).
+
+        Raises:
+            InsufficientFundsError: locked_balance < amount.
+            NotFoundError: Wallet does not exist for user_id.
+            ValidationError: amount is not positive.
+        """
+        if amount <= Decimal("0"):
+            raise ValidationError("unlock_funds: amount must be positive.")
+
+        wallet = await self._wallet_repo.get_by_user_id_for_update(user_id)
+
+        # Explicit locked-balance guard (invariant: locked >= 0 always).
+        if wallet.locked_balance < amount:
+            raise InsufficientFundsError(
+                f"Insufficient locked balance. "
+                f"Required: {amount}, Locked: {wallet.locked_balance}."
+            )
+
+        new_locked = safe_subtract(wallet.locked_balance, amount)
+        new_available = safe_add(wallet.available_balance, amount)
+
+        verify_non_negative(new_locked, "locked_balance")
+        verify_non_negative(new_available, "available_balance")
+
+        wallet = await self._wallet_repo.update_balances(
+            wallet,
+            available_balance=new_available,
+            locked_balance=new_locked,
+        )
+
+        # Ledger: locked debit + available credit (STAKE_UNLOCK entry type)
+        await self._ledger.write_stake_unlock(wallet, amount, reference_id, notes)
+        return wallet
+
+    # -----------------------------------------------------------------------
+    # transfer_locked_funds — atomic winner-path settlement
+    # -----------------------------------------------------------------------
+
+    async def transfer_locked_funds(
+        self,
+        winner_id: uuid.UUID,
+        loser_id: uuid.UUID,
+        amount: Decimal,
+        fee: Decimal,
+        bet_id: uuid.UUID,
+        notes: str | None = None,
+    ) -> tuple[Wallet, Wallet]:
+        """Consume both users' locked stakes and credit the winner net of fee.
+
+        This is the single-method implementation of the winner settlement path.
+        It is designed to be called inside an already-open database transaction
+        owned by SettlementService; it does NOT commit.
+
+        Balance movements:
+          winner.locked    -= amount              (stake consumed)
+          loser.locked     -= amount              (stake consumed)
+          winner.available += (2 * amount) - fee  (net payout credited)
+
+        Ledger entries written (all reference bet_id, type = settlement):
+          1. Winner: SETTLEMENT_DEDUCT | locked    | debit  | amount
+          2. Loser:  SETTLEMENT_DEDUCT | locked    | debit  | amount
+          3. Winner: PAYOUT_CREDIT     | available | credit | winner_payout
+             (notes carry the fee figure for full traceability)
+
+        The platform fee (``fee`` argument) is not credited to the platform
+        account here — that is the caller's responsibility (SettlementService).
+
+        Deadlock prevention:
+          Both wallets are locked with SELECT FOR UPDATE in ascending UUID order
+          so that concurrent settlement attempts always acquire locks in the same
+          sequence, eliminating deadlock cycles.
+
+        Invariants guaranteed:
+          - winner.locked_balance  >= 0 (explicit pre-check + verify_non_negative)
+          - loser.locked_balance   >= 0 (explicit pre-check + verify_non_negative)
+          - winner.available_balance >= 0 (always true: positive credit; verified)
+          - No partial state: all four mutations flushed together before ledger
+            writes; if any step raises, the transaction rolls back in full.
+
+        Args:
+            winner_id:  User who won the bet.
+            loser_id:   User who lost the bet.
+            amount:     Per-user stake (positive Decimal).
+            fee:        Platform fee deducted from the total pool (>= 0,
+                        must be strictly less than 2 * amount).
+            bet_id:     Settled bet UUID — used as ledger reference_id.
+            notes:      Optional note appended to ledger entries.
+
+        Returns:
+            Tuple of (winner_wallet, loser_wallet) after update.
+
+        Raises:
+            ValidationError:        amount <= 0, fee < 0, or fee >= 2 * amount.
+            InsufficientFundsError: Either wallet has insufficient locked balance.
+            NotFoundError:          Either wallet does not exist.
+        """
+        # ------------------------------------------------------------------
+        # 1. Input validation
+        # ------------------------------------------------------------------
+        if amount <= Decimal("0"):
+            raise ValidationError("transfer_locked_funds: amount must be positive.")
+        if fee < Decimal("0"):
+            raise ValidationError("transfer_locked_funds: fee must not be negative.")
+
+        total_pool = safe_add(amount, amount)  # 2 * amount
+        winner_payout = safe_subtract(total_pool, fee)
+
+        if winner_payout <= Decimal("0"):
+            raise ValidationError(
+                f"transfer_locked_funds: fee ({fee}) must be less than "
+                f"total pool ({total_pool})."
+            )
+
+        # ------------------------------------------------------------------
+        # 2. Acquire SELECT FOR UPDATE locks in deterministic UUID order
+        #    to prevent deadlocks when two settlements run concurrently.
+        # ------------------------------------------------------------------
+        ids_ordered = sorted([winner_id, loser_id], key=str)
+
+        wallets: dict[uuid.UUID, Wallet] = {}
+        for uid in ids_ordered:
+            wallets[uid] = await self._wallet_repo.get_by_user_id_for_update(uid)
+
+        winner_wallet = wallets[winner_id]
+        loser_wallet = wallets[loser_id]
+
+        # ------------------------------------------------------------------
+        # 3. Validate locked balances (explicit pre-checks before any mutation)
+        # ------------------------------------------------------------------
+        if winner_wallet.locked_balance < amount:
+            raise InsufficientFundsError(
+                f"Winner locked_balance insufficient. "
+                f"Required: {amount}, Locked: {winner_wallet.locked_balance}."
+            )
+        if loser_wallet.locked_balance < amount:
+            raise InsufficientFundsError(
+                f"Loser locked_balance insufficient. "
+                f"Required: {amount}, Locked: {loser_wallet.locked_balance}."
+            )
+
+        # ------------------------------------------------------------------
+        # 4. Compute new balances (no mutation yet — all-or-nothing)
+        # ------------------------------------------------------------------
+        winner_new_locked = safe_subtract(winner_wallet.locked_balance, amount)
+        winner_new_available = safe_add(winner_wallet.available_balance, winner_payout)
+        loser_new_locked = safe_subtract(loser_wallet.locked_balance, amount)
+        # loser available_balance is unchanged
+
+        # Second-level arithmetic guards
+        verify_non_negative(winner_new_locked, "winner locked_balance")
+        verify_non_negative(winner_new_available, "winner available_balance")
+        verify_non_negative(loser_new_locked, "loser locked_balance")
+
+        # ------------------------------------------------------------------
+        # 5. Persist both balance updates (both flushed before any ledger write)
+        # ------------------------------------------------------------------
+        winner_wallet = await self._wallet_repo.update_balances(
+            winner_wallet,
+            available_balance=winner_new_available,
+            locked_balance=winner_new_locked,
+        )
+        loser_wallet = await self._wallet_repo.update_balances(
+            loser_wallet,
+            locked_balance=loser_new_locked,
+        )
+
+        # ------------------------------------------------------------------
+        # 6. Write ledger entries (post-update snapshots are now on wallets)
+        # ------------------------------------------------------------------
+        fee_note = (
+            f"platform fee={fee}" if fee > Decimal("0") else "zero fee"
+        )
+        entry_notes = (
+            f"{notes}; {fee_note}" if notes else fee_note
+        )
+
+        await self._ledger.write_settlement_winner(
+            winner_wallet=winner_wallet,
+            loser_wallet=loser_wallet,
+            stake_amount=amount,
+            winner_payout=winner_payout,
+            bet_id=bet_id,
+            notes=entry_notes,
+        )
+
+        return winner_wallet, loser_wallet
