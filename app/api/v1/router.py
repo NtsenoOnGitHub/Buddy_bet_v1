@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, matches, bets, wallet
+from app.api.v1.endpoints import admin, auth, bets, matches, wallet
 
 api_router = APIRouter()
 
@@ -49,4 +49,13 @@ api_router.include_router(
     wallet.router,
     prefix="/wallet",
     tags=["Wallet"],
+)
+
+# ---------------------------------------------------------------------------
+# Admin — match result confirmation, manual settlement, bet voiding
+# ---------------------------------------------------------------------------
+api_router.include_router(
+    admin.router,
+    prefix="/admin",
+    tags=["Admin"],
 )

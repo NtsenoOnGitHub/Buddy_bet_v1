@@ -48,3 +48,20 @@ class MatchRepository(BaseRepository[Match]):
         if match is None:
             raise NotFoundError(f"Match with id={match_id} not found.")
         return match
+
+    async def get_for_update(self, match_id: uuid.UUID) -> Match:
+        """Return a match with SELECT FOR UPDATE.
+
+        Must be called before updating match result or status to prevent
+        concurrent admin requests from producing conflicting updates.
+
+        Raises:
+            NotFoundError: If no match exists for this ID.
+        """
+        result = await self.db.execute(
+            select(Match).where(Match.id == match_id).with_for_update()
+        )
+        match = result.scalar_one_or_none()
+        if match is None:
+            raise NotFoundError(f"Match with id={match_id} not found.")
+        return match

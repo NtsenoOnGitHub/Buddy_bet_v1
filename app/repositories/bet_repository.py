@@ -97,3 +97,29 @@ class BetRepository(BaseRepository[Bet]):
             )
         )
         return list(result.scalars().all())
+
+    async def transition_matched_to_pending(
+        self,
+        match_id: uuid.UUID,
+    ) -> List[Bet]:
+        """Lock all MATCHED bets for a match and transition them to PENDING_SETTLEMENT.
+
+        Uses SELECT FOR UPDATE so that concurrent callers wait rather than
+        producing duplicate transitions. Only bets in MATCHED status are
+        affected; PENDING_SETTLEMENT bets are already queued and left alone.
+
+        Returns the list of transitioned Bet instances (flushed, not committed).
+        """
+        result = await self.db.execute(
+            select(Bet)
+            .where(Bet.match_id == match_id)
+            .where(Bet.status == BetStatus.MATCHED)
+            .with_for_update()
+        )
+        bets = list(result.scalars().all())
+        for bet in bets:
+            bet.status = BetStatus.PENDING_SETTLEMENT
+            self.db.add(bet)
+        if bets:
+            await self.db.flush()
+        return bets
