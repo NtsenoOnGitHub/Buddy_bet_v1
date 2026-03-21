@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from typing import List, Optional
+from datetime import datetime
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -17,16 +18,8 @@ class ConfirmMatchResultRequest(BaseModel):
         ...,
         description="Confirmed match outcome (home_win | away_win | draw).",
     )
-    home_score: int = Field(
-        ...,
-        ge=0,
-        description="Final home team score.",
-    )
-    away_score: int = Field(
-        ...,
-        ge=0,
-        description="Final away team score.",
-    )
+    home_score: int = Field(..., ge=0, description="Final home team score.")
+    away_score: int = Field(..., ge=0, description="Final away team score.")
 
 
 class SettlementSummaryResponse(BaseModel):
@@ -39,6 +32,10 @@ class SettlementSummaryResponse(BaseModel):
     bets_already_settled: int
     bets_failed: int
     failed_bet_ids: List[uuid.UUID]
+    failure_reasons: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Maps bet_id (string UUID) to the error message for each failed settlement.",
+    )
 
 
 class ManualSettleBetResponse(BaseModel):
@@ -46,15 +43,20 @@ class ManualSettleBetResponse(BaseModel):
 
     bet_id: uuid.UUID
     message: str
+    settlement_outcome: Optional[str] = None
+    winner_id: Optional[uuid.UUID] = None
+    payout_amount: Optional[str] = None
+    platform_fee: Optional[str] = None
 
 
 class VoidBetRequest(BaseModel):
     """Body for POST /admin/bets/{bet_id}/void."""
 
-    reason: Optional[str] = Field(
-        default=None,
+    reason: str = Field(
+        ...,
+        min_length=1,
         max_length=500,
-        description="Optional admin note recorded in the audit trail.",
+        description="Required admin reason. Recorded verbatim in the audit trail.",
     )
 
 
@@ -64,3 +66,22 @@ class VoidBetResponse(BaseModel):
     bet_id: uuid.UUID
     refunded_user_ids: List[uuid.UUID]
     message: str
+
+
+class PendingSettlementItem(BaseModel):
+    """Summary of a single bet stuck in PENDING_SETTLEMENT status."""
+
+    id: uuid.UUID
+    match_id: uuid.UUID
+    creator_id: uuid.UUID
+    opponent_id: Optional[uuid.UUID] = None
+    stake_amount: str
+    currency: str
+    updated_at: Optional[datetime] = None
+
+
+class PendingSettlementListResponse(BaseModel):
+    """Response for GET /admin/bets/pending."""
+
+    items: List[PendingSettlementItem]
+    total: int

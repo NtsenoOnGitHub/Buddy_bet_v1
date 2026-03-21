@@ -32,6 +32,7 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError, SettlementIdempotencyError, ValidationError
+from app.models.bet import Bet
 from app.models.bet_event import BetEvent
 from app.models.enums import BetEventType, FootballOutcome, MatchStatus
 from app.repositories.bet_repository import BetRepository
@@ -44,6 +45,7 @@ logger = logging.getLogger(__name__)
 @dataclasses.dataclass
 class SettlementResult:
     """Summary returned after a match settlement run."""
+
     match_id: uuid.UUID
     outcome: str
     bets_found: int
@@ -51,6 +53,8 @@ class SettlementResult:
     bets_already_settled: int
     bets_failed: int
     failed_bet_ids: list[uuid.UUID]
+    failure_reasons: dict[uuid.UUID, str] = dataclasses.field(default_factory=dict)
+    """Maps failed bet_id → error message for ops visibility."""
 
 
 class MatchSettlementService:
@@ -151,7 +155,7 @@ class MatchSettlementService:
             await self._db.commit()
 
             logger.info(
-                "Match %s confirmed: outcome=%s; %d bet(s) queued for settlement",
+                "settlement.match.confirmed match_id=%s outcome=%s bets_queued=%d",
                 match_id,
                 outcome.value,
                 len(pending_bets),
@@ -168,6 +172,7 @@ class MatchSettlementService:
         settled = 0
         already_settled = 0
         failed: list[uuid.UUID] = []
+        failure_reasons: dict[uuid.UUID, str] = {}
 
         for bet_id in bet_ids:
             try:
@@ -175,17 +180,35 @@ class MatchSettlementService:
                 await settlement_svc.settle_bet(bet_id)
                 await self._db.commit()
                 settled += 1
-                logger.info("Bet %s settled successfully", bet_id)
+                logger.info(
+                    "settlement.bet.ok bet_id=%s match_id=%s",
+                    bet_id, match_id,
+                )
 
-            except SettlementIdempotencyError:
+            except SettlementIdempotencyError as e:
                 await self._db.rollback()
                 already_settled += 1
-                logger.warning("Bet %s already settled (idempotency guard)", bet_id)
+                logger.warning(
+                    "settlement.bet.already_settled bet_id=%s match_id=%s reason=%r",
+                    bet_id, match_id, str(e),
+                )
 
-            except Exception:
+            except Exception as e:
                 await self._db.rollback()
+                reason = f"{type(e).__name__}: {e}"
                 failed.append(bet_id)
-                logger.exception("Failed to settle bet %s", bet_id)
+                failure_reasons[bet_id] = reason
+                logger.exception(
+                    "settlement.bet.failed bet_id=%s match_id=%s reason=%r",
+                    bet_id, match_id, reason,
+                )
+
+        logger.info(
+            "settlement.run.complete match_id=%s outcome=%s "
+            "found=%d settled=%d already_settled=%d failed=%d",
+            match_id, outcome.value,
+            len(bet_ids), settled, already_settled, len(failed),
+        )
 
         return SettlementResult(
             match_id=match_id,
@@ -195,13 +218,17 @@ class MatchSettlementService:
             bets_already_settled=already_settled,
             bets_failed=len(failed),
             failed_bet_ids=failed,
+            failure_reasons=failure_reasons,
         )
 
-    async def settle_single_bet(self, bet_id: uuid.UUID) -> None:
+    async def settle_single_bet(self, bet_id: uuid.UUID) -> Bet:
         """Manually trigger settlement for a single PENDING_SETTLEMENT bet.
 
         Called from the admin manual-settle endpoint. Caller does NOT commit —
         this method handles commit/rollback.
+
+        Returns:
+            The refreshed Bet instance after successful settlement.
 
         Raises:
             SettlementIdempotencyError: Bet is not in PENDING_SETTLEMENT.
@@ -209,8 +236,23 @@ class MatchSettlementService:
         """
         try:
             svc = SettlementService(self._db)
-            await svc.settle_bet(bet_id)
+            bet = await svc.settle_bet(bet_id)
             await self._db.commit()
+            return bet
         except Exception:
             await self._db.rollback()
             raise
+
+    async def get_pending_settlement_bets(
+        self,
+        match_id: uuid.UUID | None = None,
+    ) -> list[Bet]:
+        """Return all bets currently stuck in PENDING_SETTLEMENT.
+
+        Used by the admin ops visibility endpoint. Ordered oldest-first so ops
+        can prioritise the most overdue bets.
+
+        Args:
+            match_id: When provided, restricts to a single match.
+        """
+        return await self._bet_repo.get_pending_settlement(match_id=match_id)

@@ -101,6 +101,28 @@ class BetRepository(BaseRepository[Bet]):
         )
         return list(result.scalars().all())
 
+    async def get_pending_settlement(
+        self,
+        match_id: uuid.UUID | None = None,
+    ) -> List[Bet]:
+        """Return all PENDING_SETTLEMENT bets, optionally filtered by match.
+
+        Ordered by updated_at ASC (longest-waiting first) so ops can prioritise
+        the most overdue bets.
+
+        Args:
+            match_id: When provided, restrict results to a single match.
+        """
+        query = (
+            select(Bet)
+            .where(Bet.status == BetStatus.PENDING_SETTLEMENT)
+            .order_by(Bet.updated_at.asc())
+        )
+        if match_id is not None:
+            query = query.where(Bet.match_id == match_id)
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
     async def transition_matched_to_pending(
         self,
         match_id: uuid.UUID,

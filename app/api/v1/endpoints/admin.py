@@ -1,31 +1,41 @@
-"""Admin endpoints — match result confirmation, manual settlement, bet voiding.
+"""Admin endpoints — match result confirmation, manual settlement, bet voiding,
+and ops visibility.
 
 All routes require admin role (get_current_admin dependency).
 
 POST /admin/matches/{match_id}/confirm-result
     Confirms the match result, transitions MATCHED bets to PENDING_SETTLEMENT,
     and runs SettlementService.settle_bet() for each — one transaction per bet.
+    Response includes failure_reasons for any bets that failed to settle.
+
+GET  /admin/bets/pending
+    Lists all bets currently in PENDING_SETTLEMENT status (i.e. awaiting
+    settlement or stuck after a failed run). Optionally filtered by match_id.
 
 POST /admin/bets/{bet_id}/settle
     Manually triggers settlement for a single PENDING_SETTLEMENT bet.
+    Returns settlement outcome, winner, payout, and fee on success.
 
 POST /admin/bets/{bet_id}/void
     Voids a bet (OPEN or MATCHED) and refunds all locked stakes.
+    Reason is required and recorded in the audit trail.
 """
 
 from __future__ import annotations
 
 import uuid
+from typing import Optional
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_admin, get_db
-from app.core.exceptions import SettlementIdempotencyError
 from app.models.user import User
 from app.schemas.admin import (
     ConfirmMatchResultRequest,
     ManualSettleBetResponse,
+    PendingSettlementItem,
+    PendingSettlementListResponse,
     SettlementSummaryResponse,
     VoidBetRequest,
     VoidBetResponse,
@@ -49,7 +59,7 @@ router = APIRouter()
         "Sets the match outcome and scores, transitions all MATCHED bets for this "
         "match to PENDING_SETTLEMENT, then calls SettlementService.settle_bet() for "
         "each eligible bet. Returns a summary of how many bets were settled, already "
-        "settled, or failed. Requires admin role."
+        "settled, or failed — including per-bet failure reasons. Requires admin role."
     ),
 )
 async def confirm_match_result(
@@ -74,11 +84,53 @@ async def confirm_match_result(
         bets_already_settled=result.bets_already_settled,
         bets_failed=result.bets_failed,
         failed_bet_ids=result.failed_bet_ids,
+        failure_reasons={str(k): v for k, v in result.failure_reasons.items()},
     )
 
 
 # ---------------------------------------------------------------------------
-# Manual single-bet settlement
+# Ops visibility: list PENDING_SETTLEMENT bets
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/bets/pending",
+    response_model=PendingSettlementListResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List bets awaiting settlement",
+    description=(
+        "Returns all bets currently in PENDING_SETTLEMENT status, ordered by "
+        "updated_at ASC (longest-waiting first). Optionally filtered by match_id. "
+        "Use this to identify bets stuck after a failed settlement run. "
+        "Requires admin role."
+    ),
+)
+async def list_pending_settlement_bets(
+    match_id: Optional[uuid.UUID] = Query(
+        default=None,
+        description="Filter by match ID. Omit to return all pending bets.",
+    ),
+    db: AsyncSession = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+) -> PendingSettlementListResponse:
+    svc = MatchSettlementService(db)
+    bets = await svc.get_pending_settlement_bets(match_id=match_id)
+    items = [
+        PendingSettlementItem(
+            id=b.id,
+            match_id=b.match_id,
+            creator_id=b.creator_id,
+            opponent_id=b.opponent_id,
+            stake_amount=str(b.stake_amount),
+            currency=b.currency,
+            updated_at=b.updated_at,
+        )
+        for b in bets
+    ]
+    return PendingSettlementListResponse(items=items, total=len(items))
+
+
+# ---------------------------------------------------------------------------
+# Manual single-bet settlement retry
 # ---------------------------------------------------------------------------
 
 @router.post(
@@ -89,7 +141,8 @@ async def confirm_match_result(
     description=(
         "Manually triggers SettlementService.settle_bet() for a bet that is in "
         "PENDING_SETTLEMENT status. Useful for retrying failed settlements or for "
-        "bets missed by the automatic flow. Requires admin role."
+        "bets missed by the automatic flow. Returns the settlement outcome, winner, "
+        "payout, and platform fee on success. Requires admin role."
     ),
 )
 async def manually_settle_bet(
@@ -98,10 +151,14 @@ async def manually_settle_bet(
     current_admin: User = Depends(get_current_admin),
 ) -> ManualSettleBetResponse:
     svc = MatchSettlementService(db)
-    await svc.settle_single_bet(bet_id)
+    bet = await svc.settle_single_bet(bet_id)
     return ManualSettleBetResponse(
         bet_id=bet_id,
         message=f"Bet {bet_id} settled successfully.",
+        settlement_outcome=bet.settlement_outcome.value if bet.settlement_outcome else None,
+        winner_id=bet.winner_id,
+        payout_amount=str(bet.payout_amount) if bet.payout_amount is not None else None,
+        platform_fee=str(bet.platform_fee) if bet.platform_fee is not None else None,
     )
 
 
@@ -117,7 +174,8 @@ async def manually_settle_bet(
     description=(
         "Voids a bet in OPEN or MATCHED status. Refunds the creator's locked stake "
         "for OPEN bets; refunds both users' stakes for MATCHED bets. "
-        "Writes a VOIDED bet_event with the admin actor. Requires admin role."
+        "A reason is required and written verbatim to the audit trail. "
+        "Requires admin role."
     ),
 )
 async def void_bet(

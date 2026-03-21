@@ -97,7 +97,7 @@ class SettlementService:
     # Public entry point
     # -----------------------------------------------------------------------
 
-    async def settle_bet(self, bet_id: uuid.UUID) -> None:
+    async def settle_bet(self, bet_id: uuid.UUID) -> Bet:
         """Execute the complete settlement flow for a single bet.
 
         Must be called inside an open transaction. Caller owns commit/rollback.
@@ -122,6 +122,10 @@ class SettlementService:
 
         Args:
             bet_id: UUID of the bet to settle.
+
+        Returns:
+            The refreshed Bet ORM instance after settlement (caller must commit
+            before accessing its attributes, unless expire_on_commit=False).
 
         Raises:
             SettlementIdempotencyError: bet.status != PENDING_SETTLEMENT, or
@@ -186,8 +190,10 @@ class SettlementService:
         )
 
         logger.info(
-            "Settling bet %s: outcome=%s winner_rate=%s no_winner_rate=%s",
-            bet_id, outcome.value, winner_fee_rate, no_winner_fee_rate,
+            "settlement.start bet_id=%s match_id=%s path=%s "
+            "winner_fee_rate=%s no_winner_fee_rate=%s",
+            bet_id, bet.match_id, outcome.value,
+            winner_fee_rate, no_winner_fee_rate,
         )
 
         # ------------------------------------------------------------------
@@ -331,13 +337,13 @@ class SettlementService:
         await self._db.flush()
 
         logger.info(
-            "Bet %s settled successfully: outcome=%s winner=%s payout=%s fee=%s",
-            bet_id,
-            outcome.value,
-            winner_id,
-            payout_amount,
-            platform_fee_amount,
+            "settlement.complete bet_id=%s match_id=%s path=%s "
+            "winner_id=%s payout=%s platform_fee=%s",
+            bet_id, bet.match_id, outcome.value,
+            winner_id, payout_amount, platform_fee_amount,
         )
+
+        return bet
 
     # -----------------------------------------------------------------------
     # Path determination
