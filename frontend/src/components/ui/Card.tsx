@@ -1,15 +1,17 @@
 interface CardProps {
   children: React.ReactNode
   className?: string
+  onClick?: React.MouseEventHandler<HTMLDivElement>
 }
 
-export function Card({ children, className = '' }: CardProps) {
+export function Card({ children, className = '', onClick }: CardProps) {
   return (
     <div
       className={[
         'rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm',
         className,
       ].join(' ')}
+      onClick={onClick}
     >
       {children}
     </div>

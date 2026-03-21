@@ -10,7 +10,7 @@ import type { FootballOutcome } from '../api/types'
 import { Input } from '../components/ui/Input'
 import { Button } from '../components/ui/Button'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
-import { Card, CardHeader, CardTitle } from '../components/ui/Card'
+import { Card } from '../components/ui/Card'
 import { formatDate } from '../utils/date'
 import { getErrorMessage } from '../utils/errors'
 

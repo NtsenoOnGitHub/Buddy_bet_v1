@@ -7,7 +7,7 @@ import { UseFormSetError, FieldValues, Path } from 'react-hook-form'
  * Safe to call with unknown values from catch blocks.
  */
 export function getErrorMessage(err: unknown): string {
-  if (err instanceof ApiError) return err.message()
+  if (err instanceof ApiError) return err.getDetail()
   if (err instanceof Error) return err.message
   return 'An unexpected error occurred.'
 }
@@ -31,6 +31,6 @@ export function applyFieldErrors<T extends FieldValues>(
     })
     return true
   }
-  setGlobal?.(err.message())
+  setGlobal?.(err.getDetail())
   return false
 }

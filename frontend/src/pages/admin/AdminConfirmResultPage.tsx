@@ -5,20 +5,32 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { matchesApi } from '../../api/matches'
 import { adminApi } from '../../api/admin'
-import type { FootballOutcome, SettlementSummaryResponse } from '../../api/types'
+import type { FootballOutcome, MatchResponse, SettlementSummaryResponse } from '../../api/types'
 import { Card, CardHeader, CardTitle } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
+import { Badge } from '../../components/ui/Badge'
 import { Input } from '../../components/ui/Input'
 import { ErrorMessage } from '../../components/ui/ErrorMessage'
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog'
 import { PageSpinner } from '../../components/ui/Spinner'
 import { formatDate } from '../../utils/date'
 import { getErrorMessage } from '../../utils/errors'
+
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const OUTCOMES: { value: FootballOutcome; label: string }[] = [
   { value: 'home_win', label: 'Home Win' },
   { value: 'away_win', label: 'Away Win' },
   { value: 'draw',     label: 'Draw' },
 ]
+
+const OUTCOME_LABELS: Record<FootballOutcome, string> = {
+  home_win: 'Home Win',
+  away_win: 'Away Win',
+  draw:     'Draw',
+}
+
+// ── Form schema ───────────────────────────────────────────────────────────────
 
 const schema = z.object({
   match_id: z.string().min(1, 'Select a match'),
@@ -39,9 +51,112 @@ const schema = z.object({
 
 type FormData = z.infer<typeof schema>
 
+// ── Settlement summary ────────────────────────────────────────────────────────
+
+function SettlementSummary({ result }: { result: SettlementSummaryResponse }) {
+  const isClean   = result.bets_failed === 0
+  const hasNoBets = result.bets_found === 0
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Settlement Summary</CardTitle>
+        <Badge variant={isClean ? 'green' : 'yellow'}>
+          {isClean ? 'Complete' : 'Partial'}
+        </Badge>
+      </CardHeader>
+
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+        <div>
+          <dt className="text-gray-500">Outcome confirmed</dt>
+          <dd className="font-medium capitalize text-gray-200">
+            {result.outcome.replace(/_/g, ' ')}
+          </dd>
+        </div>
+
+        <div>
+          <dt className="text-gray-500">Bets found</dt>
+          <dd className="font-medium text-gray-200">{result.bets_found}</dd>
+        </div>
+
+        <div>
+          <dt className="text-gray-500">Settled</dt>
+          <dd className={`font-medium ${result.bets_settled > 0 ? 'text-green-400' : 'text-gray-400'}`}>
+            {result.bets_settled}
+          </dd>
+        </div>
+
+        <div>
+          <dt className="text-gray-500">Already settled</dt>
+          <dd className="font-medium text-gray-400">{result.bets_already_settled}</dd>
+        </div>
+
+        <div>
+          <dt className="text-gray-500">Failed</dt>
+          <dd className={`font-medium ${result.bets_failed > 0 ? 'text-red-400' : 'text-gray-400'}`}>
+            {result.bets_failed}
+          </dd>
+        </div>
+      </dl>
+
+      {/* All-good note */}
+      {isClean && !hasNoBets && (
+        <p className="mt-3 text-xs text-green-400">
+          All bets settled successfully.
+        </p>
+      )}
+
+      {/* No bets note */}
+      {hasNoBets && (
+        <p className="mt-3 text-xs text-gray-500">
+          No bets were associated with this match. Result recorded but nothing to settle.
+        </p>
+      )}
+
+      {/* Failure details */}
+      {result.bets_failed > 0 && (
+        <div className="mt-3 rounded-lg border border-red-700/50 bg-red-900/20 p-3 text-xs text-red-300">
+          <p className="mb-1.5 font-semibold">
+            Failed bets — use Pending Settlement to retry:
+          </p>
+          <ul className="space-y-1">
+            {result.failed_bet_ids.map((id) => (
+              <li key={id} className="font-mono">
+                {id}
+                {result.failure_reasons[id] && (
+                  <span className="ml-2 opacity-75">— {result.failure_reasons[id]}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+// ── Empty match state ─────────────────────────────────────────────────────────
+
+function NoMatchesState() {
+  return (
+    <div className="flex flex-col items-center rounded-lg border border-gray-800 bg-gray-800/40 py-10 text-center">
+      <p className="text-sm font-medium text-gray-400">No actionable matches</p>
+      <p className="mt-1 text-xs text-gray-600">
+        Matches must be live or completed before you can confirm a result.
+      </p>
+    </div>
+  )
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
 export default function AdminConfirmResultPage() {
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const [lastResult, setLastResult]   = useState<SettlementSummaryResponse | null>(null)
+  const [lastResult,  setLastResult]  = useState<SettlementSummaryResponse | null>(null)
+
+  // Pending form data drives the confirmation dialog
+  const [pendingData,  setPendingData]  = useState<FormData | null>(null)
+  const [pendingMatch, setPendingMatch] = useState<MatchResponse | null>(null)
 
   const { data: matchData, isLoading: matchesLoading } = useQuery({
     queryKey: ['matches', 'all'],
@@ -82,6 +197,33 @@ export default function AdminConfirmResultPage() {
     (m) => m.status === 'live' || m.status === 'completed',
   ) ?? []
 
+  // Step 1: validate form and open confirmation dialog
+  function onSubmit(data: FormData) {
+    const match = matchData?.items.find((m) => m.id === data.match_id) ?? null
+    setPendingData(data)
+    setPendingMatch(match)
+  }
+
+  // Step 2: user confirmed — fire the mutation
+  function handleConfirm() {
+    if (!pendingData) return
+    const data = pendingData
+    setPendingData(null)
+    setPendingMatch(null)
+    confirmMutation.mutate(data)
+  }
+
+  function handleDialogCancel() {
+    setPendingData(null)
+    setPendingMatch(null)
+  }
+
+  const dialogDescription = pendingData
+    ? pendingMatch
+      ? `${pendingMatch.home_team} vs ${pendingMatch.away_team}: ${OUTCOME_LABELS[pendingData.outcome]} (${pendingData.home_score}–${pendingData.away_score}). This will settle all associated bets and cannot be undone.`
+      : `Outcome: ${OUTCOME_LABELS[pendingData.outcome]} (${pendingData.home_score}–${pendingData.away_score}). This will settle all associated bets and cannot be undone.`
+    : undefined
+
   return (
     <div className="mx-auto max-w-lg space-y-6">
       <div>
@@ -91,64 +233,21 @@ export default function AdminConfirmResultPage() {
         </p>
       </div>
 
-      {/* Settlement summary shown after successful confirmation */}
-      {lastResult && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Settlement Summary</CardTitle>
-          </CardHeader>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-            <div>
-              <dt className="text-gray-500">Outcome confirmed</dt>
-              <dd className="font-medium capitalize text-gray-200">
-                {lastResult.outcome.replace(/_/g, ' ')}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-gray-500">Bets found</dt>
-              <dd className="font-medium text-gray-200">{lastResult.bets_found}</dd>
-            </div>
-            <div>
-              <dt className="text-gray-500">Settled</dt>
-              <dd className="font-medium text-green-400">{lastResult.bets_settled}</dd>
-            </div>
-            <div>
-              <dt className="text-gray-500">Failed</dt>
-              <dd className={`font-medium ${lastResult.bets_failed > 0 ? 'text-red-400' : 'text-gray-400'}`}>
-                {lastResult.bets_failed}
-              </dd>
-            </div>
-          </dl>
-          {lastResult.bets_failed > 0 && (
-            <div className="mt-3 space-y-1 rounded-lg border border-red-700/50 bg-red-900/20 p-3 text-xs text-red-300">
-              <p className="font-semibold">Failed bets — use Pending Settlement to retry:</p>
-              {lastResult.failed_bet_ids.map((id) => (
-                <p key={id} className="font-mono">
-                  {id}
-                  {lastResult.failure_reasons[id] && (
-                    <span className="ml-2 opacity-75">— {lastResult.failure_reasons[id]}</span>
-                  )}
-                </p>
-              ))}
-            </div>
-          )}
-        </Card>
-      )}
+      {/* Settlement summary — shown after a successful confirmation */}
+      {lastResult && <SettlementSummary result={lastResult} />}
 
+      {/* Form card */}
       <Card>
-        <form
-          onSubmit={handleSubmit((data) => confirmMutation.mutate(data))}
-          className="space-y-5"
-        >
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
           {submitError && <ErrorMessage error={submitError} />}
 
           {/* Match selector */}
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-300">Match</label>
             {matchesLoading ? (
-              <p className="py-2 text-sm text-gray-500">Loading matches…</p>
+              <PageSpinner />
             ) : actionableMatches.length === 0 ? (
-              <p className="py-2 text-sm text-gray-500">No live or completed matches found.</p>
+              <NoMatchesState />
             ) : (
               <select
                 className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
@@ -233,12 +332,23 @@ export default function AdminConfirmResultPage() {
           <Button
             type="submit"
             className="w-full"
-            loading={confirmMutation.isPending}
+            disabled={confirmMutation.isPending}
           >
             Confirm Result &amp; Settle Bets
           </Button>
         </form>
       </Card>
+
+      {/* Confirmation dialog */}
+      <ConfirmDialog
+        open={!!pendingData}
+        title="Confirm match result?"
+        description={dialogDescription}
+        confirmLabel="Confirm &amp; Settle"
+        loading={confirmMutation.isPending}
+        onConfirm={handleConfirm}
+        onCancel={handleDialogCancel}
+      />
     </div>
   )
 }

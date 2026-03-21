@@ -17,7 +17,7 @@ export class ApiError extends Error {
   }
 
   /** Returns a flat string for simple display (joins field errors if needed). */
-  message(): string {
+  getDetail(): string {
     if (typeof this.detail === 'string') return this.detail
     return this.detail.map((e) => `${e.field}: ${e.message}`).join('; ')
   }

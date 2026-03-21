@@ -17,47 +17,28 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Annotated, Generic, List, TypeVar
 
+from pydantic import BeforeValidator, PlainSerializer
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
-from pydantic import GetCoreSchemaHandler
-from pydantic_core import core_schema
 
 
-# ---------------------------------------------------------------------------
-# DecimalStr — Decimal that serialises as a string
-# ---------------------------------------------------------------------------
-
-class _DecimalStrType:
-    """Pydantic custom type: Decimal stored/computed as Decimal, serialised as str."""
-
-    @classmethod
-    def __get_pydantic_core_schema__(
-        cls, source_type: object, handler: GetCoreSchemaHandler
-    ) -> core_schema.CoreSchema:
-        return core_schema.no_info_plain_validator_function(
-            cls._validate,
-            serialization=core_schema.plain_serializer_function_ser_schema(
-                cls._serialize, info_arg=False
-            ),
-        )
-
-    @staticmethod
-    def _validate(v: object) -> Decimal:
-        if isinstance(v, Decimal):
-            return v
-        if isinstance(v, (int, float, str)):
-            try:
-                return Decimal(str(v))
-            except Exception:
-                raise ValueError(f"Cannot convert {v!r} to Decimal")
-        raise ValueError(f"Expected Decimal-compatible value, got {type(v).__name__}")
-
-    @staticmethod
-    def _serialize(v: Decimal) -> str:
-        return str(v)
+def _parse_decimal(v: object) -> Decimal:
+    if isinstance(v, Decimal):
+        return v
+    if isinstance(v, (int, float, str)):
+        try:
+            return Decimal(str(v))
+        except Exception:
+            raise ValueError(f"Cannot convert {v!r} to Decimal")
+    raise ValueError(f"Expected Decimal-compatible value, got {type(v).__name__}")
 
 
 # Use this as the type annotation for monetary fields in response schemas.
-DecimalStr = Annotated[Decimal, _DecimalStrType()]
+# Accepts int/float/str/Decimal input; serialises as a string in JSON.
+DecimalStr = Annotated[
+    Decimal,
+    BeforeValidator(_parse_decimal),
+    PlainSerializer(str, return_type=str, when_used="json"),
+]
 
 
 # ---------------------------------------------------------------------------
