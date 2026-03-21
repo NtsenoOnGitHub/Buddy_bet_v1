@@ -35,7 +35,7 @@ export default function BetDetailPage() {
     enabled: !!betId,
   })
 
-  const { control, handleSubmit, watch } = useForm<{ opponent_prediction: FootballOutcome }>()
+  const { control, handleSubmit, watch, formState: { errors: formErrors } } = useForm<{ opponent_prediction: FootballOutcome }>()
   const chosenPrediction = watch('opponent_prediction')
 
   const acceptMutation = useMutation({
@@ -219,6 +219,9 @@ export default function BetDetailPage() {
                 )}
               />
             </div>
+            {formErrors.opponent_prediction && (
+              <p className="text-xs text-red-400">Please select a prediction before confirming.</p>
+            )}
             <Button
               type="submit"
               className="w-full"

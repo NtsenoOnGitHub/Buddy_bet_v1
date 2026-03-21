@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './auth/AuthContext'
 import AppLayout from './components/layout/AppLayout'
+import { PageSpinner } from './components/ui/Spinner'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import DashboardPage from './pages/DashboardPage'
@@ -10,7 +11,8 @@ import BetDetailPage from './pages/BetDetailPage'
 import WalletPage from './pages/WalletPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { token } = useAuth()
+  const { token, isLoading } = useAuth()
+  if (isLoading) return <PageSpinner />
   return token ? <>{children}</> : <Navigate to="/login" replace />
 }
 

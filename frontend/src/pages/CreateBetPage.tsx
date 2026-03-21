@@ -89,11 +89,13 @@ export default function CreateBetPage() {
               <option value="" disabled>
                 {matchesLoading ? 'Loading matches…' : 'Select a match'}
               </option>
-              {matchData?.items.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.home_team} vs {m.away_team} — {m.competition}
-                </option>
-              ))}
+              {matchData?.items
+                .filter((m) => m.status === 'scheduled')
+                .map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.home_team} vs {m.away_team} — {m.competition}
+                  </option>
+                ))}
             </select>
             {errors.match_id && (
               <p className="text-xs text-red-400">{errors.match_id.message}</p>
