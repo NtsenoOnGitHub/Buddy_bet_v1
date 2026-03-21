@@ -25,6 +25,7 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.repositories.user_repository import UserRepository
 from app.repositories.wallet_repository import WalletRepository
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
+from app.schemas.user import UserResponse
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -94,6 +95,7 @@ class AuthService:
             access_token=token,
             token_type="bearer",
             expires_in=settings.access_token_expire_minutes * 60,
+            user=UserResponse.model_validate(user),
         )
 
     async def login(self, request: LoginRequest) -> TokenResponse:
@@ -127,4 +129,5 @@ class AuthService:
             access_token=token,
             token_type="bearer",
             expires_in=settings.access_token_expire_minutes * 60,
+            user=UserResponse.model_validate(user),
         )

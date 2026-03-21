@@ -2,6 +2,7 @@
 
 GET  /api/v1/bets/open
 GET  /api/v1/bets/my
+GET  /api/v1/bets/{id}
 POST /api/v1/bets
 POST /api/v1/bets/{id}/accept
 POST /api/v1/bets/{id}/cancel
@@ -1132,3 +1133,201 @@ class TestConcurrentAccept:
         # Exactly one 200 and one 409 (or 422) — never two 200s
         assert 200 in statuses, f"Neither request succeeded: {r1.status_code}, {r2.status_code}"
         assert statuses != {200, 200}, "Both accepts succeeded — double-acceptance bug!"
+
+
+# ---------------------------------------------------------------------------
+# GET /bets/{id}
+# ---------------------------------------------------------------------------
+
+class TestGetBetById:
+    """GET /bets/{id} — single bet detail endpoint."""
+
+    async def _create_open_bet(
+        self, client: AsyncClient, db_session: AsyncSession, suffix: str = "gbb"
+    ) -> dict:
+        user_id, token = await register_user(
+            client,
+            email=f"gbb_{suffix}@example.com",
+            display_name=f"GBB {suffix}",
+        )
+        await fund_wallet(db_session, user_id, Decimal("500.00"))
+        match_id = await create_match(db_session)
+        resp = await client.post(
+            "/api/v1/bets",
+            json={"match_id": match_id, "creator_prediction": "home_win", "stake_amount": "100.00"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 201
+        return {"bet_id": resp.json()["id"], "token": token}
+
+    async def test_get_bet_by_id_returns_full_detail(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """GET /bets/{id} returns all expected fields including nested match."""
+        ctx = await self._create_open_bet(client, db_session, suffix="full")
+        resp = await client.get(
+            f"/api/v1/bets/{ctx['bet_id']}",
+            headers={"Authorization": f"Bearer {ctx['token']}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == ctx["bet_id"]
+        assert data["status"] == "OPEN"
+        assert data["creator_prediction"] == "home_win"
+        assert data["stake_amount"] == "100.00"
+        assert data["match"] is not None
+        assert "kickoff_at" in data["match"]
+
+    async def test_get_bet_by_id_settled_bet_has_outcome_fields(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """A settled bet returned from GET /bets/{id} includes settlement fields."""
+        ctx = await _full_matched_bet(
+            client,
+            db_session,
+            creator_email="gbb_settled_c@example.com",
+            opponent_email="gbb_settled_o@example.com",
+            admin_email="gbb_settled_a@example.com",
+        )
+        # Settle via admin confirm-result (creator prediction = home_win → creator wins)
+        await client.post(
+            f"/api/v1/admin/matches/{ctx['match_id']}/confirm-result",
+            json={"outcome": "home_win", "home_score": 1, "away_score": 0},
+            headers={"Authorization": f"Bearer {ctx['admin_token']}"},
+        )
+        resp = await client.get(
+            f"/api/v1/bets/{ctx['bet_id']}",
+            headers={"Authorization": f"Bearer {ctx['creator_token']}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "SETTLED"
+        assert data["settlement_outcome"] == "creator_wins"
+        assert data["winner_id"] == ctx["creator_id"]
+        assert data["payout_amount"] is not None
+        assert data["platform_fee"] is not None
+        assert data["settled_at"] is not None
+
+    async def test_get_bet_by_id_not_found_returns_404(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """GET /bets/{random_uuid} for a nonexistent bet returns 404."""
+        _uid, token = await register_user(
+            client, email="gbb_404@example.com", display_name="GBB 404"
+        )
+        resp = await client.get(
+            f"/api/v1/bets/{uuid.uuid4()}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 404
+
+    async def test_get_bet_by_id_unauthenticated_returns_401(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """GET /bets/{id} without a token returns 401."""
+        ctx = await self._create_open_bet(client, db_session, suffix="unauth")
+        resp = await client.get(f"/api/v1/bets/{ctx['bet_id']}")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# GET /bets/my?status=
+# ---------------------------------------------------------------------------
+
+class TestGetMyBetsStatusFilter:
+    """GET /bets/my?status= — history filtered by bet status."""
+
+    async def test_status_filter_open_returns_only_open_bets(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """?status=OPEN returns only OPEN bets, not CANCELLED ones."""
+        user_id, token = await register_user(
+            client, email="sf_user@example.com", display_name="SF User"
+        )
+        await fund_wallet(db_session, user_id, Decimal("500.00"))
+        match_id = await create_match(db_session)
+
+        # Create and immediately cancel one bet
+        r1 = await client.post(
+            "/api/v1/bets",
+            json={"match_id": match_id, "creator_prediction": "home_win", "stake_amount": "50.00"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        cancelled_id = r1.json()["id"]
+        await client.post(
+            f"/api/v1/bets/{cancelled_id}/cancel",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        # Create a second bet and leave it OPEN
+        r2 = await client.post(
+            "/api/v1/bets",
+            json={"match_id": match_id, "creator_prediction": "away_win", "stake_amount": "50.00"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        open_id = r2.json()["id"]
+
+        # Unfiltered: both bets appear
+        all_resp = await client.get(
+            "/api/v1/bets/my",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert all_resp.json()["total"] == 2
+
+        # Filtered to OPEN: only the open bet
+        open_resp = await client.get(
+            "/api/v1/bets/my?status=OPEN",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert open_resp.status_code == 200
+        data = open_resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["id"] == open_id
+        assert data["items"][0]["status"] == "OPEN"
+
+    async def test_status_filter_cancelled_returns_only_cancelled(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """?status=CANCELLED returns only the cancelled bet."""
+        user_id, token = await register_user(
+            client, email="sf_cancel@example.com", display_name="SF Cancel"
+        )
+        await fund_wallet(db_session, user_id, Decimal("500.00"))
+        match_id = await create_match(db_session)
+
+        r = await client.post(
+            "/api/v1/bets",
+            json={"match_id": match_id, "creator_prediction": "draw", "stake_amount": "50.00"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        bet_id = r.json()["id"]
+        await client.post(
+            f"/api/v1/bets/{bet_id}/cancel",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        resp = await client.get(
+            "/api/v1/bets/my?status=CANCELLED",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["status"] == "CANCELLED"
+
+    async def test_status_filter_invalid_value_returns_422(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """?status=INVALID returns 422 with a normalised field-error body."""
+        _uid, token = await register_user(
+            client, email="sf_invalid@example.com", display_name="SF Invalid"
+        )
+        resp = await client.get(
+            "/api/v1/bets/my?status=INVALID",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        # Normalised format: list of field-error dicts
+        assert isinstance(detail, list)
+        assert any("status" in e["field"] for e in detail)

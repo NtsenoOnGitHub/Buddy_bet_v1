@@ -2,6 +2,7 @@
 
 POST /api/v1/auth/register
 POST /api/v1/auth/login
+GET  /api/v1/auth/me
 """
 
 from __future__ import annotations
@@ -33,6 +34,28 @@ class TestRegister:
         assert "access_token" in data
         assert data["token_type"] == "bearer"
         assert "expires_in" in data
+
+    async def test_register_response_includes_user_profile(
+        self, client: AsyncClient
+    ) -> None:
+        """Register response embeds the user object so the frontend can bootstrap immediately."""
+        resp = await client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "profile_check@example.com",
+                "password": "strongpass1",
+                "display_name": "Profile User",
+            },
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert "user" in data
+        user = data["user"]
+        assert user["email"] == "profile_check@example.com"
+        assert user["display_name"] == "Profile User"
+        assert user["role"] == "user"
+        assert user["status"] == "active"
+        assert "id" in user
 
     async def test_register_creates_zero_balance_wallet(
         self, client: AsyncClient
@@ -95,7 +118,7 @@ class TestLogin:
     async def test_login_valid_credentials_returns_jwt(
         self, client: AsyncClient
     ) -> None:
-        """Valid email + password returns 200 with access_token."""
+        """Valid email + password returns 200 with access_token and user profile."""
         email, password = "login_ok@example.com", "goodpassword"
         await register_user(client, email=email, password=password)
 
@@ -107,6 +130,8 @@ class TestLogin:
         data = resp.json()
         assert "access_token" in data
         assert data["token_type"] == "bearer"
+        assert "user" in data
+        assert data["user"]["email"] == email
 
     async def test_login_wrong_password_returns_401(
         self, client: AsyncClient
@@ -129,4 +154,34 @@ class TestLogin:
             "/api/v1/auth/login",
             json={"email": "nobody@example.com", "password": "irrelevant123"},
         )
+        assert resp.status_code == 401
+
+
+class TestGetMe:
+    """GET /auth/me"""
+
+    async def test_get_me_returns_current_user(
+        self, client: AsyncClient
+    ) -> None:
+        """Authenticated GET /auth/me returns the current user's profile."""
+        uid, token = await register_user(
+            client, email="me_user@example.com", display_name="Me User"
+        )
+        resp = await client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == str(uid)
+        assert data["email"] == "me_user@example.com"
+        assert data["display_name"] == "Me User"
+        assert data["role"] == "user"
+        assert data["status"] == "active"
+
+    async def test_get_me_unauthenticated_returns_401(
+        self, client: AsyncClient
+    ) -> None:
+        """GET /auth/me without a token returns 401."""
+        resp = await client.get("/api/v1/auth/me")
         assert resp.status_code == 401

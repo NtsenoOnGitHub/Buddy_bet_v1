@@ -32,6 +32,7 @@ from app.core.exceptions import (
     BetNotAvailableError,
     ForbiddenError,
     MatchNotAvailableError,
+    NotFoundError,
     PredictionConflictError,
     SelfBetError,
     ValidationError,
@@ -369,10 +370,19 @@ class BetService:
         )
 
     async def get_user_bets(
-        self, user_id: uuid.UUID, params: PageParams
+        self,
+        user_id: uuid.UUID,
+        params: PageParams,
+        status: BetStatus | None = None,
     ) -> BetListResponse:
-        """Return all bets for a user (as creator or opponent), newest first."""
-        bets, total = await self._bet_repo.get_user_bets(user_id, params)
+        """Return bets for a user (as creator or opponent), newest first.
+
+        Args:
+            user_id: The authenticated user's ID.
+            params:  Pagination parameters.
+            status:  Optional status filter — restricts to a single BetStatus.
+        """
+        bets, total = await self._bet_repo.get_user_bets(user_id, params, status=status)
         items = [BetResponse.model_validate(b) for b in bets]
         return BetListResponse.create(
             items=items,
@@ -380,6 +390,25 @@ class BetService:
             page=params.page,
             page_size=params.page_size,
         )
+
+    async def get_bet_by_id(self, bet_id: uuid.UUID) -> BetResponse:
+        """Return a single bet by ID with its associated match.
+
+        Any authenticated user can retrieve any bet — consistent with the
+        public open-bet feed behaviour.
+
+        Args:
+            bet_id: UUID of the bet to retrieve.
+
+        Returns:
+            BetResponse with the nested match object populated.
+
+        Raises:
+            NotFoundError: If no bet with the given ID exists.
+        """
+        bet = await self._bet_repo.get_by_id_or_404(bet_id)
+        await self._db.refresh(bet, attribute_names=["match"])
+        return BetResponse.model_validate(bet)
 
     # -----------------------------------------------------------------------
     # Internal helpers

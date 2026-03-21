@@ -7,6 +7,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from app.schemas.user import UserResponse
+
 
 class RegisterRequest(BaseModel):
     """Request body for POST /auth/register."""
@@ -50,13 +52,18 @@ class LoginRequest(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    """Response body for successful authentication."""
+    """Response body for successful authentication.
+
+    Includes the user profile so the frontend can bootstrap the session
+    (display name, role, status) without issuing a separate GET /auth/me call.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
     access_token: str = Field(..., description="JWT Bearer access token.")
     token_type: str = Field(default="bearer", description="Token scheme.")
     expires_in: int = Field(..., description="Token lifetime in seconds.")
+    user: UserResponse = Field(..., description="Authenticated user profile.")
 
 
 class TokenPayload(BaseModel):

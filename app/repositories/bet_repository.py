@@ -68,10 +68,12 @@ class BetRepository(BaseRepository[Bet]):
         self,
         user_id: uuid.UUID,
         params: PageParams,
+        status: Optional[BetStatus] = None,
     ) -> Tuple[List[Bet], int]:
         """Return all bets for a user (as creator or opponent), newest first.
 
-        Covers the GET /bets/my endpoint — returns bets across all statuses.
+        Covers the GET /bets/my endpoint. When status is provided, only bets
+        in that status are returned — enabling per-status tab views in the UI.
         """
         query = (
             select(Bet)
@@ -81,6 +83,8 @@ class BetRepository(BaseRepository[Bet]):
             )
             .order_by(Bet.created_at.desc())
         )
+        if status is not None:
+            query = query.where(Bet.status == status)
         return await paginate(self.db, query, params)
 
     async def get_by_match_pending_settlement(

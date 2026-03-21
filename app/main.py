@@ -15,8 +15,10 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import get_settings
@@ -112,7 +114,45 @@ def create_app() -> FastAPI:
 
 
 def _register_exception_handlers(app: FastAPI) -> None:
-    """Register custom exception → JSON response mappings."""
+    """Register custom exception → JSON response mappings.
+
+    All handlers produce one of two shapes:
+      • Simple error:  {"detail": "<message string>"}
+      • Field errors:  {"detail": [{"field": "<name>", "message": "<desc>"}]}
+
+    This ensures the frontend can always handle errors with the same logic
+    regardless of whether the error originates in our code or FastAPI/Pydantic.
+    """
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(
+        request: Request, exc: StarletteHTTPException
+    ) -> JSONResponse:
+        """Normalise FastAPI/Starlette HTTP exceptions (404, 405, etc.)."""
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        """Normalise Pydantic request validation errors to field-error format.
+
+        Converts FastAPI's default verbose format to:
+          {"detail": [{"field": "body.stake_amount", "message": "..."}]}
+        """
+        errors = []
+        for e in exc.errors():
+            loc_parts = [str(p) for p in e["loc"]]
+            # Drop the leading "body" / "query" / "path" context tag for brevity
+            field = ".".join(loc_parts[1:]) if len(loc_parts) > 1 else loc_parts[0]
+            errors.append({"field": field, "message": e["msg"]})
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": errors},
+        )
 
     @app.exception_handler(AppException)
     async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
