@@ -119,9 +119,11 @@ export default function CreateBetPage() {
                     <button
                       key={value}
                       type="button"
+                      disabled={isSubmitting}
                       onClick={() => field.onChange(value)}
                       className={[
                         'rounded-lg border py-2 text-sm font-medium transition-colors',
+                        'disabled:cursor-not-allowed disabled:opacity-50',
                         field.value === value
                           ? 'border-brand-500 bg-brand-500/20 text-brand-300'
                           : 'border-gray-700 bg-gray-800 text-gray-300 hover:border-gray-500',

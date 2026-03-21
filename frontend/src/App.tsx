@@ -9,11 +9,21 @@ import CreateBetPage from './pages/CreateBetPage'
 import MyBetsPage from './pages/MyBetsPage'
 import BetDetailPage from './pages/BetDetailPage'
 import WalletPage from './pages/WalletPage'
+import AdminPendingPage from './pages/admin/AdminPendingPage'
+import AdminConfirmResultPage from './pages/admin/AdminConfirmResultPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token, isLoading } = useAuth()
   if (isLoading) return <PageSpinner />
   return token ? <>{children}</> : <Navigate to="/login" replace />
+}
+
+function RequireAdmin({ children }: { children: React.ReactNode }) {
+  const { token, user, isLoading } = useAuth()
+  if (isLoading) return <PageSpinner />
+  if (!token) return <Navigate to="/login" replace />
+  if (user?.role !== 'admin') return <Navigate to="/dashboard" replace />
+  return <>{children}</>
 }
 
 export default function App() {
@@ -37,6 +47,24 @@ export default function App() {
         <Route path="/bets/my" element={<MyBetsPage />} />
         <Route path="/bets/:betId" element={<BetDetailPage />} />
         <Route path="/wallet" element={<WalletPage />} />
+
+        {/* Admin */}
+        <Route
+          path="/admin"
+          element={
+            <RequireAdmin>
+              <AdminPendingPage />
+            </RequireAdmin>
+          }
+        />
+        <Route
+          path="/admin/confirm-result"
+          element={
+            <RequireAdmin>
+              <AdminConfirmResultPage />
+            </RequireAdmin>
+          }
+        />
       </Route>
 
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

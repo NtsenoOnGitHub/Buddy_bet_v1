@@ -136,6 +136,49 @@ export interface PaginatedResponse<T> {
   pages: number
 }
 
+// ── Admin ─────────────────────────────────────────────────────────────────────
+
+export interface PendingSettlementItem {
+  id: string
+  match_id: string
+  creator_id: string
+  opponent_id: string | null
+  stake_amount: string
+  currency: string
+  updated_at: string | null
+}
+
+export interface PendingSettlementListResponse {
+  items: PendingSettlementItem[]
+  total: number
+}
+
+export interface SettlementSummaryResponse {
+  match_id: string
+  outcome: string
+  bets_found: number
+  bets_settled: number
+  bets_already_settled: number
+  bets_failed: number
+  failed_bet_ids: string[]
+  failure_reasons: Record<string, string>
+}
+
+export interface ManualSettleBetResponse {
+  bet_id: string
+  message: string
+  settlement_outcome: string | null
+  winner_id: string | null
+  payout_amount: string | null
+  platform_fee: string | null
+}
+
+export interface VoidBetResponse {
+  bet_id: string
+  refunded_user_ids: string[]
+  message: string
+}
+
 // ── Errors ───────────────────────────────────────────────────────────────────
 
 export interface FieldError {

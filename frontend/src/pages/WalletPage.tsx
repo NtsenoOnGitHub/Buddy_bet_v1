@@ -4,6 +4,7 @@ import { walletApi } from '../api/wallet'
 import type { LedgerEntryType } from '../api/types'
 import { Card, CardHeader, CardTitle } from '../components/ui/Card'
 import { Pagination } from '../components/ui/Pagination'
+import { Button } from '../components/ui/Button'
 import { PageSpinner } from '../components/ui/Spinner'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
 import { formatMoney } from '../utils/money'
@@ -23,12 +24,22 @@ const ENTRY_LABELS: Record<LedgerEntryType, string> = {
 export default function WalletPage() {
   const [page, setPage] = useState(1)
 
-  const { data: wallet, isLoading: walletLoading, error: walletError } = useQuery({
+  const {
+    data: wallet,
+    isLoading: walletLoading,
+    error: walletError,
+    refetch: refetchWallet,
+  } = useQuery({
     queryKey: ['wallet'],
     queryFn: walletApi.get,
   })
 
-  const { data: txData, isLoading: txLoading, error: txError } = useQuery({
+  const {
+    data: txData,
+    isLoading: txLoading,
+    error: txError,
+    refetch: refetchTx,
+  } = useQuery({
     queryKey: ['wallet', 'transactions', page],
     queryFn: () => walletApi.transactions(page),
   })
@@ -44,7 +55,12 @@ export default function WalletPage() {
 
       {/* Balance card */}
       {walletLoading && <PageSpinner />}
-      {walletError && <ErrorMessage error={getErrorMessage(walletError)} />}
+      {walletError && (
+        <div className="space-y-2">
+          <ErrorMessage error={getErrorMessage(walletError)} />
+          <Button variant="secondary" size="sm" onClick={() => refetchWallet()}>Retry</Button>
+        </div>
+      )}
       {wallet && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {[
@@ -69,7 +85,12 @@ export default function WalletPage() {
         </CardHeader>
 
         {txLoading && <PageSpinner />}
-        {txError && <ErrorMessage error={getErrorMessage(txError)} />}
+        {txError && (
+          <div className="space-y-2">
+            <ErrorMessage error={getErrorMessage(txError)} />
+            <Button variant="secondary" size="sm" onClick={() => refetchTx()}>Retry</Button>
+          </div>
+        )}
 
         {txData && (
           <>

@@ -4,6 +4,7 @@ import { betsApi } from '../api/bets'
 import type { BetStatus } from '../api/types'
 import { BetCard } from '../components/bet/BetCard'
 import { Pagination } from '../components/ui/Pagination'
+import { Button } from '../components/ui/Button'
 import { PageSpinner } from '../components/ui/Spinner'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
 import { getErrorMessage } from '../utils/errors'
@@ -25,7 +26,7 @@ export default function MyBetsPage() {
     setPage(1)
   }
 
-  const { data, isLoading, isFetching, error } = useQuery({
+  const { data, isLoading, isFetching, error, refetch } = useQuery({
     queryKey: ['bets', 'my', activeTab, page],
     queryFn: () => betsApi.listMy(page, 20, activeTab),
   })
@@ -63,7 +64,12 @@ export default function MyBetsPage() {
       </div>
 
       {isLoading && <PageSpinner />}
-      {error && <ErrorMessage error={getErrorMessage(error)} />}
+      {error && (
+        <div className="space-y-2">
+          <ErrorMessage error={getErrorMessage(error)} />
+          <Button variant="secondary" size="sm" onClick={() => refetch()}>Retry</Button>
+        </div>
+      )}
 
       {data && (
         <>

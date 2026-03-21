@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { betsApi } from '../api/bets'
 import { BetCard } from '../components/bet/BetCard'
 import { Pagination } from '../components/ui/Pagination'
+import { Button } from '../components/ui/Button'
 import { PageSpinner } from '../components/ui/Spinner'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
 import { getErrorMessage } from '../utils/errors'
@@ -10,7 +11,7 @@ import { getErrorMessage } from '../utils/errors'
 export default function DashboardPage() {
   const [page, setPage] = useState(1)
 
-  const { data, isLoading, isFetching, error } = useQuery({
+  const { data, isLoading, isFetching, error, refetch } = useQuery({
     queryKey: ['bets', 'open', page],
     queryFn: () => betsApi.listOpen(page),
   })
@@ -31,7 +32,12 @@ export default function DashboardPage() {
 
       {isLoading && <PageSpinner />}
 
-      {error && <ErrorMessage error={getErrorMessage(error)} />}
+      {error && (
+        <div className="space-y-2">
+          <ErrorMessage error={getErrorMessage(error)} />
+          <Button variant="secondary" size="sm" onClick={() => refetch()}>Retry</Button>
+        </div>
+      )}
 
       {data && (
         <>
