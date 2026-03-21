@@ -12,6 +12,7 @@ from typing import List, Optional, Tuple
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import NotFoundError
 from app.models.bet import Bet
@@ -56,6 +57,7 @@ class BetRepository(BaseRepository[Bet]):
         now = datetime.now(tz=timezone.utc)
         query = (
             select(Bet)
+            .options(selectinload(Bet.match))
             .where(Bet.status == BetStatus.OPEN)
             .where(Bet.expires_at > now)
             .order_by(Bet.created_at.desc())
@@ -73,6 +75,7 @@ class BetRepository(BaseRepository[Bet]):
         """
         query = (
             select(Bet)
+            .options(selectinload(Bet.match))
             .where(
                 or_(Bet.creator_id == user_id, Bet.opponent_id == user_id)
             )

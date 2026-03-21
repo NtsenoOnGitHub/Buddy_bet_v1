@@ -276,6 +276,10 @@ class BetService:
             "Bet matched: bet_id=%s opponent_id=%s", bet.id, opponent.id
         )
 
+        # Eagerly load the match relationship so Pydantic's synchronous
+        # model_validate can access bet.match without triggering a lazy load
+        # (which would fail with MissingGreenlet in async context).
+        await self._db.refresh(bet, attribute_names=["match"])
         return BetResponse.model_validate(bet)
 
     # -----------------------------------------------------------------------
@@ -346,6 +350,7 @@ class BetService:
             "Bet cancelled: bet_id=%s by user_id=%s", bet.id, requester.id
         )
 
+        await self._db.refresh(bet, attribute_names=["match"])
         return BetResponse.model_validate(bet)
 
     # -----------------------------------------------------------------------
