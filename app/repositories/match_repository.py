@@ -87,6 +87,13 @@ class MatchRepository(BaseRepository[Match]):
             raise NotFoundError(f"Match with id={match_id} not found.")
         return match
 
+    async def get_by_external_id(self, external_id: str) -> Optional[Match]:
+        """Return a match by provider external_id, or None if not found."""
+        result = await self.db.execute(
+            select(Match).where(Match.external_id == external_id)
+        )
+        return result.scalar_one_or_none()
+
     async def get_for_update(self, match_id: uuid.UUID) -> Match:
         """Return a match with SELECT FOR UPDATE.
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import admin, auth, bets, matches, wallet
+from app.api.v1.endpoints import admin, auth, bets, matches, sync, wallet
 
 api_router = APIRouter()
 
@@ -58,4 +58,13 @@ api_router.include_router(
     admin.router,
     prefix="/admin",
     tags=["Admin"],
+)
+
+# ---------------------------------------------------------------------------
+# Admin — match sync triggers (requires SPORTS_PROVIDER_ENABLED=true)
+# ---------------------------------------------------------------------------
+api_router.include_router(
+    sync.router,
+    prefix="/admin/sync",
+    tags=["Admin - Sync"],
 )

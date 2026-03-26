@@ -2,6 +2,16 @@
 
 Matches are a local mirror of fixture data ingested from an external provider.
 The outcome column drives settlement — it must be consistent with the scores.
+
+Provider sync lifecycle
+-----------------------
+  external_id   — stable dedup key from the provider.
+  provider_name — identifies which provider wrote this row (e.g. "api_football").
+  last_synced_at— timestamp of the most recent successful sync for this fixture.
+
+  Sync writes outcome/scores when a provider marks a match as finished.
+  result_confirmed_at is set ONLY by the admin confirm-result endpoint, which
+  also triggers settlement.  This separation keeps sync and settlement decoupled.
 """
 
 from __future__ import annotations
@@ -34,6 +44,13 @@ class Match(Base):
         nullable=False,
         unique=True,
     )
+    # Provider that originally ingested this fixture.
+    # NULL for manually-created/seeded matches.
+    provider_name: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        index=True,
+    )
     home_team: Mapped[str] = mapped_column(String(200), nullable=False)
     away_team: Mapped[str] = mapped_column(String(200), nullable=False)
     competition: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -56,6 +73,12 @@ class Match(Base):
         nullable=True,
     )
     result_confirmed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    # Timestamp of the most recent provider sync for this fixture.
+    # NULL for manually-created/seeded matches; updated by MatchSyncService.
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )

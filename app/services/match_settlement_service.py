@@ -110,7 +110,8 @@ class MatchSettlementService:
 
         Raises:
             NotFoundError:  Match does not exist.
-            ValidationError: Match is already completed or has an outcome set.
+            ValidationError: Match result has already been admin-confirmed
+                             (result_confirmed_at is not None).
         """
         # ------------------------------------------------------------------
         # Transaction A: confirm match + transition bets
@@ -118,14 +119,16 @@ class MatchSettlementService:
         try:
             match = await self._match_repo.get_for_update(match_id)
 
-            if match.status == MatchStatus.completed:
+            # Guard: reject if admin has already confirmed this match.
+            # Note: sync may have pre-populated status/outcome/scores before
+            # admin confirmation — that is intentional and allowed.  Only an
+            # explicit admin confirm-result (which sets result_confirmed_at)
+            # locks the match against re-settlement.
+            if match.result_confirmed_at is not None:
                 raise ValidationError(
-                    f"Match {match_id} is already marked as completed."
-                )
-            if match.outcome is not None:
-                raise ValidationError(
-                    f"Match {match_id} already has a confirmed outcome: "
-                    f"{match.outcome.value!r}."
+                    f"Match {match_id} was already confirmed at "
+                    f"{match.result_confirmed_at.isoformat()}. "
+                    "Settlement cannot be re-run."
                 )
 
             now = datetime.now(tz=timezone.utc)

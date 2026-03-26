@@ -158,6 +158,28 @@ async def _init_db_once() -> None:
 
             await conn.run_sync(Base.metadata.create_all)
 
+        # --- Incremental schema migrations (idempotent ADD COLUMN IF NOT EXISTS) ---
+        async with engine.begin() as conn:
+            # Sprint 2: provider ingestion columns
+            await conn.execute(
+                text(
+                    "ALTER TABLE matches "
+                    "ADD COLUMN IF NOT EXISTS provider_name VARCHAR(50);"
+                )
+            )
+            await conn.execute(
+                text(
+                    "ALTER TABLE matches "
+                    "ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ;"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_matches_provider_name "
+                    "ON matches (provider_name);"
+                )
+            )
+
         # --- Seed static data -------------------------------------------------
         async with engine.begin() as conn:
             await conn.execute(

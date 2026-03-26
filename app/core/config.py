@@ -82,6 +82,41 @@ class Settings(BaseSettings):
     bet_creation_cutoff_minutes: int = 15
 
     # -----------------------------------------------------------------------
+    # Sports data provider (match ingestion)
+    # -----------------------------------------------------------------------
+    # Set SPORTS_PROVIDER_ENABLED=true and supply an API key to enable
+    # live fixture ingestion.  The sync service will not run if this is false.
+    #
+    # Supported provider:  api_football  (https://www.api-football.com)
+    # Free tier: 100 calls/day — plenty for scheduled sync runs.
+    #
+    # Required env vars (never commit real values):
+    #   SPORTS_PROVIDER_API_KEY=<your-key>
+    #   SPORTS_PROVIDER_ENABLED=true
+    # -----------------------------------------------------------------------
+    sports_provider: str = "api_football"
+    sports_provider_enabled: bool = False
+    sports_provider_api_key: str = ""
+    sports_provider_base_url: str = "https://v3.football.api-sports.io"
+    # Leagues to track (comma-separated IDs or Python list).
+    # Defaults: Premier League(39), La Liga(140), Bundesliga(78),
+    #           Serie A(135), Ligue 1(61), UEFA Champions League(2).
+    sports_provider_league_ids: List[int] = [39, 140, 78, 135, 61, 2]
+    # How many calendar days ahead to fetch upcoming fixtures
+    sports_provider_sync_days_ahead: int = 7
+    # How many calendar days back to fetch recent results
+    sports_provider_sync_days_back: int = 2
+    # HTTP request timeout (seconds)
+    sports_provider_timeout_seconds: int = 30
+
+    @field_validator("sports_provider_league_ids", mode="before")
+    @classmethod
+    def parse_league_ids(cls, v: object) -> List[int]:
+        if isinstance(v, str):
+            return [int(i.strip()) for i in v.split(",") if i.strip()]
+        return v  # type: ignore[return-value]
+
+    # -----------------------------------------------------------------------
     # Development helpers
     # -----------------------------------------------------------------------
     # Set SEED_TEST_USER=true to auto-create a funded test user on startup.
