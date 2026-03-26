@@ -31,12 +31,17 @@ _bearer_scheme = HTTPBearer(auto_error=False)
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Yield an async database session scoped to a single request.
 
-    Transaction lifecycle is owned by the service layer for write operations.
-    The session is closed (and any uncommitted transaction rolled back) when
-    the async context manager exits.
+    Owns the transaction lifecycle: commits on clean exit, rolls back on any
+    exception.  Services must only call ``flush()`` — never ``commit()`` or
+    ``rollback()``.
     """
     async with AsyncSessionFactory() as session:
-        yield session
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 # ---------------------------------------------------------------------------

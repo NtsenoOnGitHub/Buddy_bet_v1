@@ -14,6 +14,9 @@ Concurrency safety:
   - Wallet lock: WalletService.lock_stake uses SELECT FOR UPDATE on wallet row.
   - Bet acceptance: BetRepository.get_for_update uses SELECT FOR UPDATE on bet row.
   - Both locks are held inside the SAME transaction, preventing all known races.
+
+Transaction ownership:
+  get_db (dependency) owns commit/rollback.  Services only call flush().
 """
 
 from __future__ import annotations
@@ -77,7 +80,7 @@ class BetService:
           2. Persist the Bet row (status=OPEN) to obtain a real bet.id.
           3. Lock the creator's stake via WalletService (SELECT FOR UPDATE on wallet).
           4. Write CREATED bet_event.
-          All steps share the same transaction — callers commit via get_db.
+          All steps share the same transaction; get_db commits on clean exit.
 
         Args:
             creator: The authenticated user creating the bet.
@@ -121,48 +124,42 @@ class BetService:
                 f"stake_amount exceeds the maximum of {settings.max_stake_amount}."
             )
 
-        try:
-            # Step 2: Persist the bet row to get a real bet.id
-            # expires_at = match.kickoff_at (spec: bets.expires_at = matches.kickoff_at)
-            bet = Bet(
-                match_id=request.match_id,
-                creator_id=creator.id,
-                creator_prediction=request.creator_prediction,
-                stake_amount=stake,
-                currency=settings.platform_currency,
-                status=BetStatus.OPEN,
-                expires_at=match.kickoff_at,
-            )
-            self._db.add(bet)
-            await self._db.flush()
-            await self._db.refresh(bet)
+        # Step 2: Persist the bet row to get a real bet.id
+        # expires_at = match.kickoff_at (spec: bets.expires_at = matches.kickoff_at)
+        bet = Bet(
+            match_id=request.match_id,
+            creator_id=creator.id,
+            creator_prediction=request.creator_prediction,
+            stake_amount=stake,
+            currency=settings.platform_currency,
+            status=BetStatus.OPEN,
+            expires_at=match.kickoff_at,
+        )
+        self._db.add(bet)
+        await self._db.flush()
+        await self._db.refresh(bet)
 
-            # Step 3: Lock creator's stake — uses real bet.id as ledger reference_id
-            await self._wallet_service.lock_stake(
-                user_id=creator.id,
-                amount=stake,
-                bet_id=bet.id,
-                notes=f"Stake locked at bet creation (bet_id={bet.id})",
-            )
+        # Step 3: Lock creator's stake — uses real bet.id as ledger reference_id
+        await self._wallet_service.lock_stake(
+            user_id=creator.id,
+            amount=stake,
+            bet_id=bet.id,
+            notes=f"Stake locked at bet creation (bet_id={bet.id})",
+        )
 
-            # Step 4: Write CREATED audit event
-            await self._write_bet_event(
-                bet_id=bet.id,
-                event_type=BetEventType.CREATED,
-                actor_id=creator.id,
-                actor_label="USER",
-                payload={
-                    "match_id": str(request.match_id),
-                    "creator_prediction": request.creator_prediction.value,
-                    "stake_amount": str(stake),
-                    "expires_at": match.kickoff_at.isoformat(),
-                },
-            )
-
-            await self._db.commit()
-        except Exception:
-            await self._db.rollback()
-            raise
+        # Step 4: Write CREATED audit event
+        await self._write_bet_event(
+            bet_id=bet.id,
+            event_type=BetEventType.CREATED,
+            actor_id=creator.id,
+            actor_label="USER",
+            payload={
+                "match_id": str(request.match_id),
+                "creator_prediction": request.creator_prediction.value,
+                "stake_amount": str(stake),
+                "expires_at": match.kickoff_at.isoformat(),
+            },
+        )
 
         logger.info(
             "Bet created: bet_id=%s creator_id=%s stake=%s",
@@ -237,41 +234,35 @@ class BetService:
                 "You must choose one of the two remaining outcomes."
             )
 
-        try:
-            # Step 3: Lock opponent's stake (validates funds; SELECT FOR UPDATE on wallet)
-            await self._wallet_service.lock_stake(
-                user_id=opponent.id,
-                amount=bet.stake_amount,
-                bet_id=bet.id,
-                notes=f"Stake locked at bet acceptance (bet_id={bet.id})",
-            )
+        # Step 3: Lock opponent's stake (validates funds; SELECT FOR UPDATE on wallet)
+        await self._wallet_service.lock_stake(
+            user_id=opponent.id,
+            amount=bet.stake_amount,
+            bet_id=bet.id,
+            notes=f"Stake locked at bet acceptance (bet_id={bet.id})",
+        )
 
-            # Step 4: Transition bet to MATCHED
-            bet.opponent_id = opponent.id
-            bet.opponent_prediction = request.opponent_prediction
-            bet.status = BetStatus.MATCHED
+        # Step 4: Transition bet to MATCHED
+        bet.opponent_id = opponent.id
+        bet.opponent_prediction = request.opponent_prediction
+        bet.status = BetStatus.MATCHED
 
-            self._db.add(bet)
-            await self._db.flush()
-            await self._db.refresh(bet)
+        self._db.add(bet)
+        await self._db.flush()
+        await self._db.refresh(bet)
 
-            # Step 5: Write MATCHED audit event
-            await self._write_bet_event(
-                bet_id=bet.id,
-                event_type=BetEventType.MATCHED,
-                actor_id=opponent.id,
-                actor_label="USER",
-                payload={
-                    "opponent_id": str(opponent.id),
-                    "opponent_prediction": request.opponent_prediction.value,
-                    "stake_amount": str(bet.stake_amount),
-                },
-            )
-
-            await self._db.commit()
-        except Exception:
-            await self._db.rollback()
-            raise
+        # Step 5: Write MATCHED audit event
+        await self._write_bet_event(
+            bet_id=bet.id,
+            event_type=BetEventType.MATCHED,
+            actor_id=opponent.id,
+            actor_label="USER",
+            payload={
+                "opponent_id": str(opponent.id),
+                "opponent_prediction": request.opponent_prediction.value,
+                "stake_amount": str(bet.stake_amount),
+            },
+        )
 
         logger.info(
             "Bet matched: bet_id=%s opponent_id=%s", bet.id, opponent.id
@@ -318,34 +309,28 @@ class BetService:
                 "Only OPEN bets may be cancelled by the creator."
             )
 
-        try:
-            # Unlock creator's stake
-            await self._wallet_service.unlock_stake(
-                user_id=bet.creator_id,
-                amount=bet.stake_amount,
-                bet_id=bet.id,
-                notes=f"Stake unlocked at cancellation (bet_id={bet.id})",
-            )
+        # Unlock creator's stake
+        await self._wallet_service.unlock_stake(
+            user_id=bet.creator_id,
+            amount=bet.stake_amount,
+            bet_id=bet.id,
+            notes=f"Stake unlocked at cancellation (bet_id={bet.id})",
+        )
 
-            # Transition to CANCELLED
-            bet.status = BetStatus.CANCELLED
-            self._db.add(bet)
-            await self._db.flush()
-            await self._db.refresh(bet)
+        # Transition to CANCELLED
+        bet.status = BetStatus.CANCELLED
+        self._db.add(bet)
+        await self._db.flush()
+        await self._db.refresh(bet)
 
-            # Write CANCELLED audit event
-            await self._write_bet_event(
-                bet_id=bet.id,
-                event_type=BetEventType.CANCELLED,
-                actor_id=requester.id,
-                actor_label="USER",
-                payload={"cancelled_by": str(requester.id)},
-            )
-
-            await self._db.commit()
-        except Exception:
-            await self._db.rollback()
-            raise
+        # Write CANCELLED audit event
+        await self._write_bet_event(
+            bet_id=bet.id,
+            event_type=BetEventType.CANCELLED,
+            actor_id=requester.id,
+            actor_label="USER",
+            payload={"cancelled_by": str(requester.id)},
+        )
 
         logger.info(
             "Bet cancelled: bet_id=%s by user_id=%s", bet.id, requester.id

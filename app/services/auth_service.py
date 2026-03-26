@@ -11,6 +11,9 @@ Login:
 1. Look up the user by email.
 2. Verify the plain-text password against the stored hash.
 3. Issue a JWT access token.
+
+Transaction ownership:
+  get_db (dependency) owns commit/rollback.  Services only call flush().
 """
 
 from __future__ import annotations
@@ -76,25 +79,22 @@ class AuthService:
         # Hash password — plain text never stored or logged
         password_hash = hash_password(request.password)
 
-        try:
-            # Create user
-            user = await self._user_repo.create(
-                email=normalised_email,
-                display_name=request.display_name,
-                password_hash=password_hash,
-                phone_number=request.phone_number,
-            )
+        # Create user
+        user = await self._user_repo.create(
+            email=normalised_email,
+            display_name=request.display_name,
+            password_hash=password_hash,
+            phone_number=request.phone_number,
+        )
 
-            # Create zero-balance wallet (one wallet per user)
-            await self._wallet_repo.create(
-                user_id=user.id,
-                currency=settings.platform_currency,
-            )
+        # Create zero-balance wallet (one wallet per user)
+        await self._wallet_repo.create(
+            user_id=user.id,
+            currency=settings.platform_currency,
+        )
 
-            await self._db.commit()
-        except Exception:
-            await self._db.rollback()
-            raise
+        # Flush so user.id is available for the token; get_db commits on exit.
+        await self._db.flush()
 
         logger.info("New user registered: id=%s email=%s", user.id, user.email)
 
@@ -180,14 +180,9 @@ class AuthService:
 
         new_hash = hash_password(request.new_password)
 
-        try:
-            user.password_hash = new_hash
-            self._db.add(user)
-            await self._db.flush()
-            await self._db.commit()
-        except Exception:
-            await self._db.rollback()
-            raise
+        user.password_hash = new_hash
+        self._db.add(user)
+        await self._db.flush()
 
         logger.info("reset_password: password updated for user_id=%s", user.id)
 

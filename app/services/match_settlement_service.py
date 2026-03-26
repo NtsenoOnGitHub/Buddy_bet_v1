@@ -13,13 +13,16 @@ Responsibilities
 
 Transaction model
 -----------------
-- Step 1+2 share one transaction (match update + bet transitions).
-- Each bet settlement is its own transaction (commit on success, rollback on
-  any error including SettlementIdempotencyError to avoid leaking partial state).
-- The caller (admin endpoint) provides a single AsyncSession whose transaction
-  lifecycle is fully managed here.
+This service is an EXEMPT multi-transaction orchestrator.  Unlike all other
+services (which defer commit/rollback to get_db), this service manages its own
+transaction lifecycle because it requires multiple sequential commits:
 
-Caller owns nothing — confirm_and_settle() handles all commits and rollbacks.
+- Transaction A (Step 1+2): match update + MATCHED → PENDING_SETTLEMENT.
+- Transactions B…N (Step 3): one independent commit per bet settlement, so a
+  single failing bet does not prevent others from settling.
+
+The admin endpoint passes the session but does NOT commit — this service owns
+all commits and rollbacks for the lifetime of the request.
 """
 
 from __future__ import annotations
