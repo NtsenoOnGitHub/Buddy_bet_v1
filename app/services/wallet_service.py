@@ -382,6 +382,180 @@ class WalletService:
         return wallet
 
     # -----------------------------------------------------------------------
+    # Deposit credit — credit available_balance on deposit completion
+    # -----------------------------------------------------------------------
+
+    async def credit_deposit(
+        self,
+        user_id: uuid.UUID,
+        amount: Decimal,
+        deposit_id: uuid.UUID,
+        notes: str | None = None,
+    ) -> Wallet:
+        """Credit ``amount`` to available_balance when a deposit is completed.
+
+        Acquires SELECT FOR UPDATE, adds amount to available_balance, writes
+        a DEPOSIT ledger entry.
+
+        Args:
+            user_id: Recipient user.
+            amount: Positive Decimal to credit.
+            deposit_id: The DepositRequest UUID (used as ledger reference_id).
+            notes: Optional ledger note.
+
+        Raises:
+            ValidationError: amount is not positive.
+            NotFoundError: Wallet does not exist.
+        """
+        if amount <= Decimal("0"):
+            raise ValidationError("credit_deposit: amount must be positive.")
+
+        wallet = await self._wallet_repo.get_by_user_id_for_update(user_id)
+        new_available = safe_add(wallet.available_balance, amount)
+        verify_non_negative(new_available, "available_balance")
+
+        wallet = await self._wallet_repo.update_balances(
+            wallet, available_balance=new_available
+        )
+        await self._ledger.write_deposit_credit(wallet, amount, deposit_id, notes)
+        return wallet
+
+    # -----------------------------------------------------------------------
+    # Withdrawal hold — available → locked when withdrawal is requested
+    # -----------------------------------------------------------------------
+
+    async def hold_withdrawal(
+        self,
+        user_id: uuid.UUID,
+        amount: Decimal,
+        withdrawal_id: uuid.UUID,
+        notes: str | None = None,
+    ) -> Wallet:
+        """Move ``amount`` from available_balance to locked_balance.
+
+        Called when a withdrawal request is created. Funds are held in locked
+        until the withdrawal is completed (debited) or rejected/failed (released).
+
+        Writes paired WITHDRAWAL_HOLD ledger entries.
+
+        Raises:
+            InsufficientFundsError: available_balance < amount.
+            ValidationError: amount is not positive.
+            NotFoundError: Wallet does not exist.
+        """
+        if amount <= Decimal("0"):
+            raise ValidationError("hold_withdrawal: amount must be positive.")
+
+        wallet = await self._wallet_repo.get_by_user_id_for_update(user_id)
+
+        if wallet.available_balance < amount:
+            raise InsufficientFundsError(
+                f"Insufficient available balance for withdrawal. "
+                f"Required: {amount}, Available: {wallet.available_balance}."
+            )
+
+        new_available = safe_subtract(wallet.available_balance, amount)
+        new_locked = safe_add(wallet.locked_balance, amount)
+        verify_non_negative(new_available, "available_balance")
+        verify_non_negative(new_locked, "locked_balance")
+
+        wallet = await self._wallet_repo.update_balances(
+            wallet,
+            available_balance=new_available,
+            locked_balance=new_locked,
+        )
+        await self._ledger.write_withdrawal_hold(wallet, amount, withdrawal_id, notes)
+        return wallet
+
+    # -----------------------------------------------------------------------
+    # Withdrawal release — locked → available on rejection / failure
+    # -----------------------------------------------------------------------
+
+    async def release_withdrawal_hold(
+        self,
+        user_id: uuid.UUID,
+        amount: Decimal,
+        withdrawal_id: uuid.UUID,
+        notes: str | None = None,
+    ) -> Wallet:
+        """Move ``amount`` from locked_balance back to available_balance.
+
+        Called when a withdrawal is rejected or fails. Reverses the hold
+        placed by hold_withdrawal.
+
+        Writes paired WITHDRAWAL_RELEASE ledger entries.
+
+        Raises:
+            InsufficientFundsError: locked_balance < amount.
+            ValidationError: amount is not positive.
+            NotFoundError: Wallet does not exist.
+        """
+        if amount <= Decimal("0"):
+            raise ValidationError("release_withdrawal_hold: amount must be positive.")
+
+        wallet = await self._wallet_repo.get_by_user_id_for_update(user_id)
+
+        if wallet.locked_balance < amount:
+            raise InsufficientFundsError(
+                f"Insufficient locked balance to release. "
+                f"Required: {amount}, Locked: {wallet.locked_balance}."
+            )
+
+        new_locked = safe_subtract(wallet.locked_balance, amount)
+        new_available = safe_add(wallet.available_balance, amount)
+        verify_non_negative(new_locked, "locked_balance")
+        verify_non_negative(new_available, "available_balance")
+
+        wallet = await self._wallet_repo.update_balances(
+            wallet,
+            available_balance=new_available,
+            locked_balance=new_locked,
+        )
+        await self._ledger.write_withdrawal_release(wallet, amount, withdrawal_id, notes)
+        return wallet
+
+    # -----------------------------------------------------------------------
+    # Withdrawal finalise — debit locked on completion (funds leave platform)
+    # -----------------------------------------------------------------------
+
+    async def finalize_withdrawal_debit(
+        self,
+        user_id: uuid.UUID,
+        amount: Decimal,
+        withdrawal_id: uuid.UUID,
+        notes: str | None = None,
+    ) -> Wallet:
+        """Debit ``amount`` from locked_balance when a withdrawal is completed.
+
+        The held funds are permanently removed. Writes a single WITHDRAWAL
+        ledger entry (locked debit — funds leave the platform).
+
+        Raises:
+            InsufficientFundsError: locked_balance < amount.
+            ValidationError: amount is not positive.
+            NotFoundError: Wallet does not exist.
+        """
+        if amount <= Decimal("0"):
+            raise ValidationError("finalize_withdrawal_debit: amount must be positive.")
+
+        wallet = await self._wallet_repo.get_by_user_id_for_update(user_id)
+
+        if wallet.locked_balance < amount:
+            raise InsufficientFundsError(
+                f"Insufficient locked balance to finalise withdrawal. "
+                f"Required: {amount}, Locked: {wallet.locked_balance}."
+            )
+
+        new_locked = safe_subtract(wallet.locked_balance, amount)
+        verify_non_negative(new_locked, "locked_balance")
+
+        wallet = await self._wallet_repo.update_balances(
+            wallet, locked_balance=new_locked
+        )
+        await self._ledger.write_withdrawal_debit(wallet, amount, withdrawal_id, notes)
+        return wallet
+
+    # -----------------------------------------------------------------------
     # transfer_locked_funds — atomic winner-path settlement
     # -----------------------------------------------------------------------
 

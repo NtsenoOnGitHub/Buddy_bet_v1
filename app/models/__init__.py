@@ -15,6 +15,8 @@ from app.models.bet import Bet  # noqa: F401
 from app.models.ledger import LedgerEntry  # noqa: F401
 from app.models.bet_event import BetEvent  # noqa: F401
 from app.models.processed_event import ProcessedEvent  # noqa: F401
+from app.models.deposit import DepositRequest  # noqa: F401
+from app.models.withdrawal import WithdrawalRequest  # noqa: F401
 
 __all__ = [
     "User",
@@ -27,4 +29,6 @@ __all__ = [
     "LedgerEntry",
     "BetEvent",
     "ProcessedEvent",
+    "DepositRequest",
+    "WithdrawalRequest",
 ]

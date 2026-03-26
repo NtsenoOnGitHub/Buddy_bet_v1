@@ -11,7 +11,17 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import admin, auth, bets, matches, sync, wallet
+from app.api.v1.endpoints import (
+    admin,
+    admin_funding,
+    auth,
+    bets,
+    deposits,
+    matches,
+    sync,
+    wallet,
+    withdrawals,
+)
 
 api_router = APIRouter()
 
@@ -52,12 +62,39 @@ api_router.include_router(
 )
 
 # ---------------------------------------------------------------------------
+# Deposits — user-facing (under /wallet prefix)
+# ---------------------------------------------------------------------------
+api_router.include_router(
+    deposits.router,
+    prefix="/wallet",
+    tags=["Deposits"],
+)
+
+# ---------------------------------------------------------------------------
+# Withdrawals — user-facing (under /wallet prefix)
+# ---------------------------------------------------------------------------
+api_router.include_router(
+    withdrawals.router,
+    prefix="/wallet",
+    tags=["Withdrawals"],
+)
+
+# ---------------------------------------------------------------------------
 # Admin — match result confirmation, manual settlement, bet voiding
 # ---------------------------------------------------------------------------
 api_router.include_router(
     admin.router,
     prefix="/admin",
     tags=["Admin"],
+)
+
+# ---------------------------------------------------------------------------
+# Admin — deposit and withdrawal management
+# ---------------------------------------------------------------------------
+api_router.include_router(
+    admin_funding.router,
+    prefix="/admin",
+    tags=["Admin - Funding"],
 )
 
 # ---------------------------------------------------------------------------

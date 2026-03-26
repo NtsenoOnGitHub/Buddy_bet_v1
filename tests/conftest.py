@@ -77,7 +77,14 @@ _PG_ENUMS: list[tuple[str, tuple[str, ...]]] = [
             "FEE_DEDUCT",
             "DEPOSIT",
             "WITHDRAWAL",
+            "WITHDRAWAL_HOLD",
+            "WITHDRAWAL_RELEASE",
         ),
+    ),
+    ("deposit_status", ("pending", "processing", "completed", "failed", "cancelled")),
+    (
+        "withdrawal_status",
+        ("pending", "approved", "processing", "completed", "failed", "rejected"),
     ),
     ("balance_field", ("available", "locked")),
     ("ledger_direction", ("credit", "debit")),
@@ -158,7 +165,7 @@ async def _init_db_once() -> None:
 
             await conn.run_sync(Base.metadata.create_all)
 
-        # --- Incremental schema migrations (idempotent ADD COLUMN IF NOT EXISTS) ---
+        # --- Incremental schema migrations (idempotent) ---
         async with engine.begin() as conn:
             # Sprint 2: provider ingestion columns
             await conn.execute(
@@ -177,6 +184,19 @@ async def _init_db_once() -> None:
                 text(
                     "CREATE INDEX IF NOT EXISTS ix_matches_provider_name "
                     "ON matches (provider_name);"
+                )
+            )
+            # Sprint 3: new ledger_entry_type values for withdrawal lifecycle
+            await conn.execute(
+                text(
+                    "ALTER TYPE ledger_entry_type "
+                    "ADD VALUE IF NOT EXISTS 'WITHDRAWAL_HOLD'"
+                )
+            )
+            await conn.execute(
+                text(
+                    "ALTER TYPE ledger_entry_type "
+                    "ADD VALUE IF NOT EXISTS 'WITHDRAWAL_RELEASE'"
                 )
             )
 

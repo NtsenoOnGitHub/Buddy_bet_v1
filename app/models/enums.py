@@ -77,6 +77,9 @@ class LedgerEntryType(str, enum.Enum):
     FEE_DEDUCT = "FEE_DEDUCT"
     DEPOSIT = "DEPOSIT"
     WITHDRAWAL = "WITHDRAWAL"
+    # Funding: withdrawal lifecycle
+    WITHDRAWAL_HOLD = "WITHDRAWAL_HOLD"      # available → locked when withdrawal requested
+    WITHDRAWAL_RELEASE = "WITHDRAWAL_RELEASE"  # locked → available on rejection/failure
 
 
 class BalanceField(str, enum.Enum):
@@ -117,6 +120,25 @@ class FeeType(str, enum.Enum):
     """Maps to PostgreSQL enum: fee_type"""
     WINNER_FEE = "WINNER_FEE"
     NO_WINNER_FEE = "NO_WINNER_FEE"
+
+
+class DepositStatus(str, enum.Enum):
+    """Maps to PostgreSQL enum: deposit_status"""
+    pending = "pending"
+    processing = "processing"
+    completed = "completed"
+    failed = "failed"
+    cancelled = "cancelled"
+
+
+class WithdrawalStatus(str, enum.Enum):
+    """Maps to PostgreSQL enum: withdrawal_status"""
+    pending = "pending"
+    approved = "approved"
+    processing = "processing"
+    completed = "completed"
+    failed = "failed"
+    rejected = "rejected"
 
 
 class BetEventType(str, enum.Enum):

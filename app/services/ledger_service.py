@@ -254,6 +254,160 @@ class LedgerService:
     #   Step 6: User B  REFUND_CREDIT     available credit refund_per_user
     # -----------------------------------------------------------------------
 
+    # -----------------------------------------------------------------------
+    # DEPOSIT — funds credited to available on deposit completion
+    # Entry: available credit (single entry — no locked movement)
+    # -----------------------------------------------------------------------
+
+    async def write_deposit_credit(
+        self,
+        wallet: Wallet,
+        amount: Decimal,
+        deposit_id: uuid.UUID,
+        notes: str | None = None,
+    ) -> None:
+        """Write a single DEPOSIT entry when a deposit is completed.
+
+        Entry: DEPOSIT | available | credit | amount
+
+        The wallet must already have its available_balance incremented before
+        this is called so the snapshot reflects the post-credit state.
+        """
+        await self._repo.create_entry(
+            user_id=wallet.user_id,
+            wallet_id=wallet.id,
+            entry_type=LedgerEntryType.DEPOSIT,
+            balance_field=BalanceField.available,
+            direction=LedgerDirection.credit,
+            amount=amount,
+            reference_type=LedgerReferenceType.deposit,
+            reference_id=deposit_id,
+            available_balance_after=wallet.available_balance,
+            locked_balance_after=wallet.locked_balance,
+            notes=notes or "Deposit completed — funds credited to available balance",
+        )
+
+    # -----------------------------------------------------------------------
+    # WITHDRAWAL_HOLD — available → locked when withdrawal is requested
+    # Entries: available debit + locked credit
+    # -----------------------------------------------------------------------
+
+    async def write_withdrawal_hold(
+        self,
+        wallet: Wallet,
+        amount: Decimal,
+        withdrawal_id: uuid.UUID,
+        notes: str | None = None,
+    ) -> None:
+        """Write two WITHDRAWAL_HOLD entries when funds are reserved for withdrawal.
+
+        Entry 1: WITHDRAWAL_HOLD | available | debit  | amount
+        Entry 2: WITHDRAWAL_HOLD | locked    | credit | amount
+        """
+        await self._repo.create_entry(
+            user_id=wallet.user_id,
+            wallet_id=wallet.id,
+            entry_type=LedgerEntryType.WITHDRAWAL_HOLD,
+            balance_field=BalanceField.available,
+            direction=LedgerDirection.debit,
+            amount=amount,
+            reference_type=LedgerReferenceType.withdrawal,
+            reference_id=withdrawal_id,
+            available_balance_after=wallet.available_balance,
+            locked_balance_after=wallet.locked_balance,
+            notes=notes or "Withdrawal hold — funds moved from available to locked",
+        )
+        await self._repo.create_entry(
+            user_id=wallet.user_id,
+            wallet_id=wallet.id,
+            entry_type=LedgerEntryType.WITHDRAWAL_HOLD,
+            balance_field=BalanceField.locked,
+            direction=LedgerDirection.credit,
+            amount=amount,
+            reference_type=LedgerReferenceType.withdrawal,
+            reference_id=withdrawal_id,
+            available_balance_after=wallet.available_balance,
+            locked_balance_after=wallet.locked_balance,
+            notes=notes or "Withdrawal hold — funds moved from available to locked",
+        )
+
+    # -----------------------------------------------------------------------
+    # WITHDRAWAL_RELEASE — locked → available on rejection or failure
+    # Entries: locked debit + available credit
+    # -----------------------------------------------------------------------
+
+    async def write_withdrawal_release(
+        self,
+        wallet: Wallet,
+        amount: Decimal,
+        withdrawal_id: uuid.UUID,
+        notes: str | None = None,
+    ) -> None:
+        """Write two WITHDRAWAL_RELEASE entries when held funds are returned.
+
+        Entry 1: WITHDRAWAL_RELEASE | locked    | debit  | amount
+        Entry 2: WITHDRAWAL_RELEASE | available | credit | amount
+        """
+        await self._repo.create_entry(
+            user_id=wallet.user_id,
+            wallet_id=wallet.id,
+            entry_type=LedgerEntryType.WITHDRAWAL_RELEASE,
+            balance_field=BalanceField.locked,
+            direction=LedgerDirection.debit,
+            amount=amount,
+            reference_type=LedgerReferenceType.withdrawal,
+            reference_id=withdrawal_id,
+            available_balance_after=wallet.available_balance,
+            locked_balance_after=wallet.locked_balance,
+            notes=notes or "Withdrawal released — held funds returned to available",
+        )
+        await self._repo.create_entry(
+            user_id=wallet.user_id,
+            wallet_id=wallet.id,
+            entry_type=LedgerEntryType.WITHDRAWAL_RELEASE,
+            balance_field=BalanceField.available,
+            direction=LedgerDirection.credit,
+            amount=amount,
+            reference_type=LedgerReferenceType.withdrawal,
+            reference_id=withdrawal_id,
+            available_balance_after=wallet.available_balance,
+            locked_balance_after=wallet.locked_balance,
+            notes=notes or "Withdrawal released — held funds returned to available",
+        )
+
+    # -----------------------------------------------------------------------
+    # WITHDRAWAL — final debit from locked on completion
+    # Entry: locked debit (single entry — funds leave the platform)
+    # -----------------------------------------------------------------------
+
+    async def write_withdrawal_debit(
+        self,
+        wallet: Wallet,
+        amount: Decimal,
+        withdrawal_id: uuid.UUID,
+        notes: str | None = None,
+    ) -> None:
+        """Write a single WITHDRAWAL entry when a withdrawal is finalised.
+
+        Entry: WITHDRAWAL | locked | debit | amount
+
+        The wallet must already have its locked_balance decremented before
+        this is called so the snapshot reflects the post-debit state.
+        """
+        await self._repo.create_entry(
+            user_id=wallet.user_id,
+            wallet_id=wallet.id,
+            entry_type=LedgerEntryType.WITHDRAWAL,
+            balance_field=BalanceField.locked,
+            direction=LedgerDirection.debit,
+            amount=amount,
+            reference_type=LedgerReferenceType.withdrawal,
+            reference_id=withdrawal_id,
+            available_balance_after=wallet.available_balance,
+            locked_balance_after=wallet.locked_balance,
+            notes=notes or "Withdrawal completed — funds debited from locked balance",
+        )
+
     async def write_settlement_no_winner(
         self,
         creator_wallet: Wallet,
