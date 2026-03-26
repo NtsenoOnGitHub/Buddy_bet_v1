@@ -36,6 +36,17 @@ export type LedgerEntryType =
   | 'FEE_DEDUCT'
   | 'PAYOUT_CREDIT'
   | 'REFUND_CREDIT'
+  | 'DEPOSIT'
+  | 'WITHDRAWAL'
+  | 'WITHDRAWAL_HOLD'
+  | 'WITHDRAWAL_RELEASE'
+
+export type DepositStatus =
+  | 'pending'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
 
 export type BalanceField = 'available' | 'locked'
 export type LedgerDirection = 'credit' | 'debit'
@@ -126,6 +137,29 @@ export interface TransactionResponse {
   locked_balance_after: string        // decimal string
   notes: string | null
   created_at: string
+}
+
+export interface DepositResponse {
+  id: string
+  user_id: string
+  wallet_id: string
+  amount: string            // decimal string
+  currency: string
+  status: DepositStatus
+  payment_provider: string | null
+  provider_reference: string | null
+  client_reference: string | null
+  notes: string | null
+  checkout_url: string | null
+  requested_at: string
+  completed_at: string | null
+  failed_at: string | null
+}
+
+export interface InitiateDepositResponse {
+  deposit_id: string
+  checkout_url: string
+  status: DepositStatus
 }
 
 // ── Pagination ───────────────────────────────────────────────────────────────

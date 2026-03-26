@@ -11,6 +11,8 @@ import CreateBetPage from './pages/CreateBetPage'
 import MyBetsPage from './pages/MyBetsPage'
 import BetDetailPage from './pages/BetDetailPage'
 import WalletPage from './pages/WalletPage'
+import DepositPage from './pages/DepositPage'
+import DepositReturnPage from './pages/DepositReturnPage'
 import MatchesPage from './pages/MatchesPage'
 import AdminPendingPage from './pages/admin/AdminPendingPage'
 import AdminConfirmResultPage from './pages/admin/AdminConfirmResultPage'
@@ -53,6 +55,10 @@ export default function App() {
         <Route path="/bets/my" element={<MyBetsPage />} />
         <Route path="/bets/:betId" element={<BetDetailPage />} />
         <Route path="/wallet" element={<WalletPage />} />
+        <Route path="/wallet/deposit" element={<DepositPage />} />
+        {/* Both return and cancel URLs point to the same status page */}
+        <Route path="/wallet/deposit/return" element={<DepositReturnPage />} />
+        <Route path="/wallet/deposit/cancel" element={<DepositReturnPage />} />
 
         {/* Admin */}
         <Route

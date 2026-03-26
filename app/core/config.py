@@ -117,6 +117,39 @@ class Settings(BaseSettings):
         return v  # type: ignore[return-value]
 
     # -----------------------------------------------------------------------
+    # PayFast payment gateway
+    # -----------------------------------------------------------------------
+    # Sign up at https://www.payfast.co.za/
+    # Sandbox: https://sandbox.payfast.co.za/
+    #
+    # Required for deposit initiation (PAYFAST_ENABLED=true):
+    #   PAYFAST_MERCHANT_ID=<your merchant id>
+    #   PAYFAST_MERCHANT_KEY=<your merchant key>
+    #   PAYFAST_PASSPHRASE=<your security passphrase (optional but recommended)>
+    #
+    # URL configuration (must be publicly reachable for webhooks in production):
+    #   PAYFAST_RETURN_URL  — where PayFast sends the browser after payment
+    #   PAYFAST_CANCEL_URL  — where PayFast sends the browser on cancellation
+    #   PAYFAST_NOTIFY_URL  — backend ITN (webhook) endpoint called by PayFast
+    # -----------------------------------------------------------------------
+    payfast_enabled: bool = False
+    payfast_sandbox: bool = True
+    payfast_merchant_id: str = ""
+    payfast_merchant_key: str = ""
+    payfast_passphrase: str = ""
+    payfast_return_url: str = "http://localhost:3000/wallet/deposit/return"
+    payfast_cancel_url: str = "http://localhost:3000/wallet/deposit/cancel"
+    payfast_notify_url: str = "http://localhost:8000/api/v1/payments/webhooks/payfast"
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def payfast_checkout_url(self) -> str:
+        """PayFast hosted checkout endpoint (sandbox or production)."""
+        if self.payfast_sandbox:
+            return "https://sandbox.payfast.co.za/eng/process"
+        return "https://www.payfast.co.za/eng/process"
+
+    # -----------------------------------------------------------------------
     # Development helpers
     # -----------------------------------------------------------------------
     # Set SEED_TEST_USER=true to auto-create a funded test user on startup.

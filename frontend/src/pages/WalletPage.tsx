@@ -1,8 +1,11 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { walletApi } from '../api/wallet'
-import type { LedgerEntryType } from '../api/types'
+import { depositsApi } from '../api/deposits'
+import type { DepositStatus, LedgerEntryType } from '../api/types'
 import { Card, CardHeader, CardTitle } from '../components/ui/Card'
+import { Badge } from '../components/ui/Badge'
 import { Pagination } from '../components/ui/Pagination'
 import { Button } from '../components/ui/Button'
 import { PageSpinner } from '../components/ui/Spinner'
@@ -19,10 +22,33 @@ const ENTRY_LABELS: Record<LedgerEntryType, string> = {
   FEE_DEDUCT:         'Platform fee',
   PAYOUT_CREDIT:      'Winnings',
   REFUND_CREDIT:      'Refund',
+  DEPOSIT:            'Deposit',
+  WITHDRAWAL:         'Withdrawal',
+  WITHDRAWAL_HOLD:    'Withdrawal held',
+  WITHDRAWAL_RELEASE: 'Withdrawal released',
+}
+
+type DepositBadgeVariant = 'green' | 'blue' | 'yellow' | 'red' | 'gray'
+
+const DEPOSIT_STATUS_VARIANT: Record<DepositStatus, DepositBadgeVariant> = {
+  pending:    'yellow',
+  processing: 'blue',
+  completed:  'green',
+  failed:     'red',
+  cancelled:  'gray',
+}
+
+const DEPOSIT_STATUS_LABEL: Record<DepositStatus, string> = {
+  pending:    'Pending',
+  processing: 'Processing',
+  completed:  'Completed',
+  failed:     'Failed',
+  cancelled:  'Cancelled',
 }
 
 export default function WalletPage() {
-  const [page, setPage] = useState(1)
+  const [txPage, setTxPage] = useState(1)
+  const [depositPage, setDepositPage] = useState(1)
 
   const {
     data: wallet,
@@ -40,20 +66,35 @@ export default function WalletPage() {
     error: txError,
     refetch: refetchTx,
   } = useQuery({
-    queryKey: ['wallet', 'transactions', page],
-    queryFn: () => walletApi.transactions(page),
+    queryKey: ['wallet', 'transactions', txPage],
+    queryFn: () => walletApi.transactions(txPage),
+  })
+
+  const {
+    data: depositData,
+    isLoading: depositLoading,
+    error: depositError,
+    refetch: refetchDeposits,
+  } = useQuery({
+    queryKey: ['wallet', 'deposits', depositPage],
+    queryFn: () => depositsApi.list(depositPage),
   })
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white">Wallet</h1>
-        <p className="mt-1 text-sm text-gray-400">
-          Your balances and full transaction history.
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Wallet</h1>
+          <p className="mt-1 text-sm text-gray-400">
+            Your balances, deposits, and transaction history.
+          </p>
+        </div>
+        <Link to="/wallet/deposit">
+          <Button>Deposit</Button>
+        </Link>
       </div>
 
-      {/* Balance card */}
+      {/* Balance cards */}
       {walletLoading && <PageSpinner />}
       {walletError && (
         <div className="space-y-2">
@@ -77,6 +118,82 @@ export default function WalletPage() {
           ))}
         </div>
       )}
+
+      {/* Deposit history */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Deposits</CardTitle>
+        </CardHeader>
+
+        {depositLoading && <PageSpinner />}
+        {depositError && (
+          <div className="space-y-2">
+            <ErrorMessage error={getErrorMessage(depositError)} />
+            <Button variant="secondary" size="sm" onClick={() => refetchDeposits()}>Retry</Button>
+          </div>
+        )}
+
+        {depositData && (
+          <>
+            {depositData.items.length === 0 ? (
+              <div className="py-4 text-center">
+                <p className="text-gray-500">No deposits yet.</p>
+                <Link to="/wallet/deposit" className="mt-2 inline-block">
+                  <Button size="sm" className="mt-2">Make your first deposit</Button>
+                </Link>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-800 text-left text-xs text-gray-500">
+                      <th className="pb-2 pr-4">Amount</th>
+                      <th className="pb-2 pr-4">Status</th>
+                      <th className="pb-2 pr-4">Provider</th>
+                      <th className="pb-2">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800">
+                    {depositData.items.map((d) => (
+                      <tr key={d.id} className="text-gray-300">
+                        <td className="py-3 pr-4 font-semibold text-white">
+                          {formatMoney(d.amount, d.currency)}
+                        </td>
+                        <td className="py-3 pr-4">
+                          <Badge variant={DEPOSIT_STATUS_VARIANT[d.status]}>
+                            {DEPOSIT_STATUS_LABEL[d.status]}
+                          </Badge>
+                          {(d.status === 'processing' || d.status === 'pending') && (
+                            <Link
+                              to={`/wallet/deposit/return?deposit_id=${d.id}`}
+                              className="ml-2 text-xs text-brand-400 underline hover:text-brand-300"
+                            >
+                              Check status
+                            </Link>
+                          )}
+                        </td>
+                        <td className="py-3 pr-4 text-xs capitalize text-gray-500">
+                          {d.payment_provider ?? '—'}
+                        </td>
+                        <td className="py-3 text-xs text-gray-500">
+                          {formatDate(d.requested_at)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <Pagination
+              page={depositData.page}
+              pages={depositData.pages}
+              total={depositData.total}
+              onPageChange={setDepositPage}
+            />
+          </>
+        )}
+      </Card>
 
       {/* Transaction history */}
       <Card>
@@ -154,7 +271,7 @@ export default function WalletPage() {
               page={txData.page}
               pages={txData.pages}
               total={txData.total}
-              onPageChange={setPage}
+              onPageChange={setTxPage}
             />
           </>
         )}

@@ -1,6 +1,7 @@
 """User-facing deposit endpoints.
 
-POST /wallet/deposits              — create a deposit request
+POST /wallet/deposits/initiate     — initiate a PayFast deposit (returns checkout URL)
+POST /wallet/deposits              — create a manual deposit request (admin-completed)
 GET  /wallet/deposits              — list the current user's deposits
 GET  /wallet/deposits/{deposit_id} — get a single deposit
 """
@@ -15,10 +16,48 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependencies import get_current_user, get_db
 from app.models.user import User
 from app.schemas.common import PageParams, PaginatedResponse
-from app.schemas.funding import CreateDepositRequest, DepositResponse
+from app.schemas.funding import (
+    CreateDepositRequest,
+    DepositResponse,
+    InitiateDepositRequest,
+    InitiateDepositResponse,
+)
 from app.services.deposit_service import DepositService
 
 router = APIRouter()
+
+
+@router.post(
+    "/deposits/initiate",
+    response_model=InitiateDepositResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Initiate a PayFast deposit",
+    description=(
+        "Creates a pending deposit, builds a signed PayFast checkout URL, and "
+        "returns the URL for the frontend to redirect the user. "
+        "Wallet is NOT credited at this point — credit happens only after the "
+        "payment provider posts a verified ITN webhook. "
+        "Requires authentication."
+    ),
+)
+async def initiate_deposit(
+    body: InitiateDepositRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> InitiateDepositResponse:
+    svc = DepositService(db)
+    deposit = await svc.initiate_payfast_deposit(
+        user_id=current_user.id,
+        amount=body.amount,
+        email_address=body.email_address,
+        name_first=body.name_first,
+        name_last=body.name_last,
+    )
+    return InitiateDepositResponse(
+        deposit_id=deposit.id,
+        checkout_url=deposit.checkout_url or "",
+        status=deposit.status,
+    )
 
 
 @router.post(

@@ -83,6 +83,8 @@ class DepositRequest(Base):
         unique=True,
     )
     notes: Mapped[Optional[str]] = mapped_column(sa.Text, nullable=True)
+    # Full PayFast checkout URL stored so the frontend can retrieve it after creation
+    checkout_url: Mapped[Optional[str]] = mapped_column(sa.Text, nullable=True)
 
     # Timestamps
     requested_at: Mapped[datetime] = mapped_column(

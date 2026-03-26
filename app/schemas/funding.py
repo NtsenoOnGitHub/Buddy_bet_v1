@@ -73,9 +73,53 @@ class DepositResponse(BaseModel):
     provider_reference: Optional[str] = None
     client_reference: Optional[str] = None
     notes: Optional[str] = None
+    checkout_url: Optional[str] = None
     requested_at: datetime
     completed_at: Optional[datetime] = None
     failed_at: Optional[datetime] = None
+
+
+# ---------------------------------------------------------------------------
+# Deposit — PayFast initiation
+# ---------------------------------------------------------------------------
+
+
+class InitiateDepositRequest(BaseModel):
+    """Body for POST /wallet/deposits/initiate."""
+
+    amount: DecimalStr = Field(
+        ...,
+        description="Amount to deposit in ZAR (must be positive).",
+    )
+    email_address: Optional[str] = Field(
+        default=None,
+        description="User email pre-filled on the PayFast checkout page.",
+    )
+    name_first: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="User first name pre-filled on checkout.",
+    )
+    name_last: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="User last name pre-filled on checkout.",
+    )
+
+    @field_validator("amount", mode="after")
+    @classmethod
+    def amount_must_be_positive(cls, v: Decimal) -> Decimal:
+        if v <= Decimal("0"):
+            raise ValueError("amount must be positive.")
+        return v
+
+
+class InitiateDepositResponse(BaseModel):
+    """Response for POST /wallet/deposits/initiate."""
+
+    deposit_id: uuid.UUID
+    checkout_url: str
+    status: DepositStatus
 
 
 # ---------------------------------------------------------------------------

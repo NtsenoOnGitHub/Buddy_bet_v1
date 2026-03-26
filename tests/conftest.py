@@ -199,6 +199,13 @@ async def _init_db_once() -> None:
                     "ADD VALUE IF NOT EXISTS 'WITHDRAWAL_RELEASE'"
                 )
             )
+            # Sprint 4: checkout_url on deposit_requests
+            await conn.execute(
+                text(
+                    "ALTER TABLE deposit_requests "
+                    "ADD COLUMN IF NOT EXISTS checkout_url TEXT;"
+                )
+            )
 
         # --- Seed static data -------------------------------------------------
         async with engine.begin() as conn:

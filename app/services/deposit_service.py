@@ -25,9 +25,11 @@ from typing import List, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from app.models.deposit import DepositRequest
 from app.models.enums import DepositStatus
+from app.payments.payfast import build_checkout_params, build_checkout_url
 from app.repositories.deposit_repository import DepositRepository
 from app.repositories.wallet_repository import WalletRepository
 from app.schemas.common import PageParams
@@ -104,6 +106,82 @@ class DepositService:
 
         logger.info(
             "deposit.created user=%s deposit=%s amount=%s",
+            user_id,
+            deposit.id,
+            amount,
+        )
+        return deposit
+
+    # -----------------------------------------------------------------------
+    # Initiate via PayFast
+    # -----------------------------------------------------------------------
+
+    async def initiate_payfast_deposit(
+        self,
+        user_id: uuid.UUID,
+        amount: Decimal,
+        *,
+        email_address: str | None = None,
+        name_first: str | None = None,
+        name_last: str | None = None,
+    ) -> DepositRequest:
+        """Create a pending deposit and build a signed PayFast checkout URL.
+
+        Stores the checkout URL on the DepositRequest row so the frontend can
+        retrieve it. The deposit status advances to processing after the user
+        is redirected; wallet is credited only on ITN completion.
+
+        Args:
+            user_id: The requesting user.
+            amount: Positive ZAR amount.
+            email_address: Pre-fill buyer email on PayFast checkout.
+            name_first: Pre-fill buyer first name.
+            name_last: Pre-fill buyer last name.
+
+        Returns:
+            DepositRequest with checkout_url populated (status=pending).
+
+        Raises:
+            ValidationError: amount is out of configured bounds or PayFast is disabled.
+            NotFoundError: User has no wallet.
+        """
+        settings = get_settings()
+        if not settings.payfast_enabled:
+            raise ValidationError("PayFast deposits are not enabled on this server.")
+        if amount < settings.min_stake_amount:
+            raise ValidationError(
+                f"Minimum deposit amount is {settings.min_stake_amount} {settings.platform_currency}."
+            )
+        if amount > settings.max_stake_amount:
+            raise ValidationError(
+                f"Maximum deposit amount is {settings.max_stake_amount} {settings.platform_currency}."
+            )
+
+        # Create the pending record first so we have a deposit_id for the URL
+        deposit = await self.create_deposit(
+            user_id=user_id,
+            amount=amount,
+            currency=settings.platform_currency,
+            payment_provider="payfast",
+        )
+
+        # Build signed PayFast checkout URL and store on the record
+        params = build_checkout_params(
+            deposit_id=str(deposit.id),
+            amount=amount,
+            email_address=email_address,
+            name_first=name_first,
+            name_last=name_last,
+        )
+        deposit.checkout_url = build_checkout_url(params)
+        # Advance to processing — user is being redirected to PayFast
+        deposit.status = DepositStatus.processing
+        self._db.add(deposit)
+        await self._db.flush()
+        await self._db.refresh(deposit)
+
+        logger.info(
+            "deposit.payfast_initiated user=%s deposit=%s amount=%s",
             user_id,
             deposit.id,
             amount,

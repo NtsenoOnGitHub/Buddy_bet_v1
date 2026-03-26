@@ -1,16 +1,17 @@
 """Admin funding management endpoints.
 
 Deposit admin actions:
-    GET  /admin/deposits                   — list all deposits (with status filter)
-    POST /admin/deposits/{id}/complete     — complete deposit (credits wallet)
-    POST /admin/deposits/{id}/fail         — fail deposit (no wallet change)
+    GET  /admin/deposits                       — list all deposits (with status filter)
+    POST /admin/deposits/{id}/complete         — complete deposit (credits wallet)
+    POST /admin/deposits/{id}/fail             — fail deposit (no wallet change)
+    POST /admin/deposits/{id}/verify           — reconcile: manually complete with known pf_payment_id
 
 Withdrawal admin actions:
-    GET  /admin/withdrawals                — list all withdrawals (with status filter)
-    POST /admin/withdrawals/{id}/approve   — approve pending withdrawal
-    POST /admin/withdrawals/{id}/reject    — reject withdrawal (releases funds)
-    POST /admin/withdrawals/{id}/complete  — complete withdrawal (debits locked)
-    POST /admin/withdrawals/{id}/fail      — fail withdrawal (releases funds)
+    GET  /admin/withdrawals                    — list all withdrawals (with status filter)
+    POST /admin/withdrawals/{id}/approve       — approve pending withdrawal
+    POST /admin/withdrawals/{id}/reject        — reject withdrawal (releases funds)
+    POST /admin/withdrawals/{id}/complete      — complete withdrawal (debits locked)
+    POST /admin/withdrawals/{id}/fail          — fail withdrawal (releases funds)
 
 All routes require admin role.
 """
@@ -20,7 +21,7 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Body, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_admin, get_db
@@ -120,6 +121,34 @@ async def admin_fail_deposit(
 ) -> DepositResponse:
     svc = DepositService(db)
     deposit = await svc.fail_deposit(deposit_id=deposit_id, reason=body.reason)
+    return DepositResponse.model_validate(deposit)
+
+
+@router.post(
+    "/deposits/{deposit_id}/verify",
+    response_model=DepositResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Reconcile deposit with PayFast reference (admin)",
+    description=(
+        "Reconciliation helper: manually completes a deposit using a known "
+        "pf_payment_id from the PayFast dashboard. Use when the ITN was missed "
+        "or disputed. Follows the same complete_deposit() path as webhooks — "
+        "wallet is credited, ledger entry written, status becomes completed. "
+        "Requires admin role."
+    ),
+)
+async def admin_verify_deposit(
+    deposit_id: uuid.UUID,
+    pf_payment_id: str = Body(..., embed=True, description="pf_payment_id from PayFast dashboard"),
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(get_current_admin),
+) -> DepositResponse:
+    svc = DepositService(db)
+    deposit = await svc.complete_deposit(
+        deposit_id=deposit_id,
+        provider_reference=pf_payment_id,
+        notes="Admin reconciliation — manual verify",
+    )
     return DepositResponse.model_validate(deposit)
 
 

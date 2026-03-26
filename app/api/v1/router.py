@@ -20,6 +20,7 @@ from app.api.v1.endpoints import (
     matches,
     sync,
     wallet,
+    webhooks,
     withdrawals,
 )
 
@@ -104,4 +105,13 @@ api_router.include_router(
     sync.router,
     prefix="/admin/sync",
     tags=["Admin - Sync"],
+)
+
+# ---------------------------------------------------------------------------
+# Payment webhooks — no user auth; PayFast posts here after payment
+# ---------------------------------------------------------------------------
+api_router.include_router(
+    webhooks.router,
+    prefix="/payments",
+    tags=["Payments - Webhooks"],
 )
