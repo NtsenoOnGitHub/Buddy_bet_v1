@@ -4,11 +4,14 @@ import AppLayout from './components/layout/AppLayout'
 import { PageSpinner } from './components/ui/Spinner'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
+import ForgotPasswordPage from './pages/ForgotPasswordPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 import DashboardPage from './pages/DashboardPage'
 import CreateBetPage from './pages/CreateBetPage'
 import MyBetsPage from './pages/MyBetsPage'
 import BetDetailPage from './pages/BetDetailPage'
 import WalletPage from './pages/WalletPage'
+import MatchesPage from './pages/MatchesPage'
 import AdminPendingPage from './pages/admin/AdminPendingPage'
 import AdminConfirmResultPage from './pages/admin/AdminConfirmResultPage'
 
@@ -32,6 +35,8 @@ export default function App() {
       {/* Public */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
 
       {/* Protected */}
       <Route
@@ -43,6 +48,7 @@ export default function App() {
       >
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/matches" element={<MatchesPage />} />
         <Route path="/bets/new" element={<CreateBetPage />} />
         <Route path="/bets/my" element={<MyBetsPage />} />
         <Route path="/bets/:betId" element={<BetDetailPage />} />

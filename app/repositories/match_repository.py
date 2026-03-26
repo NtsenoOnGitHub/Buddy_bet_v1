@@ -27,12 +27,50 @@ class MatchRepository(BaseRepository[Match]):
 
         'Available' means status = 'scheduled', ordered by kickoff_at ASC
         (next match first).
+
+        Used internally by BetService for match validation. For the public
+        listing API use get_filtered() which supports status/competition filters.
         """
         query = (
             select(Match)
             .where(Match.status == MatchStatus.scheduled)
             .order_by(Match.kickoff_at.asc())
         )
+        return await paginate(self.db, query, params)
+
+    async def get_filtered(
+        self,
+        params: PageParams,
+        status: Optional[MatchStatus] = None,
+        competition: Optional[str] = None,
+    ) -> Tuple[List[Match], int]:
+        """Return a paginated, filtered match list ordered by kickoff_at ASC.
+
+        Args:
+            params: Pagination parameters.
+            status: If provided, restrict to matches with this exact status.
+                    If None, all statuses are returned.
+            competition: If provided, case-insensitive substring match against
+                         the competition column (e.g. "premier" matches
+                         "Premier League").  If None, all competitions returned.
+
+        Returns:
+            Tuple of (list of Match, total row count before pagination).
+
+        Design note:
+            All ordering is by kickoff_at ASC — next-to-kick-off first.
+            The caller controls status scope; betting eligibility is a separate
+            concern expressed via MatchResponse.is_betting_open.
+        """
+        query = select(Match)
+
+        if status is not None:
+            query = query.where(Match.status == status)
+
+        if competition is not None:
+            query = query.where(Match.competition.ilike(f"%{competition}%"))
+
+        query = query.order_by(Match.kickoff_at.asc())
         return await paginate(self.db, query, params)
 
     async def get_by_id(self, match_id: uuid.UUID) -> Optional[Match]:  # type: ignore[override]

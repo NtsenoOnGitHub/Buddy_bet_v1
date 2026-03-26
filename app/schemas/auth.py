@@ -66,6 +66,51 @@ class TokenResponse(BaseModel):
     user: UserResponse = Field(..., description="Authenticated user profile.")
 
 
+class ForgotPasswordRequest(BaseModel):
+    """Request body for POST /auth/forgot-password."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    email: EmailStr = Field(..., description="Email address of the account to reset.")
+
+
+class ForgotPasswordResponse(BaseModel):
+    """Response body for POST /auth/forgot-password.
+
+    The message is intentionally vague to prevent email enumeration.
+    In development mode the reset_token is included so the flow can be
+    tested without an email service.  In production this field is None
+    and the token must be delivered out-of-band (email).
+    """
+
+    message: str
+    reset_token: Optional[str] = Field(
+        default=None,
+        description="Only present in development. Use this token with /auth/reset-password.",
+    )
+
+
+class ResetPasswordRequest(BaseModel):
+    """Request body for POST /auth/reset-password."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    token: str = Field(..., description="The reset token received from /auth/forgot-password.")
+    new_password: str = Field(
+        ...,
+        min_length=8,
+        max_length=128,
+        description="New plain-text password (min 8 characters). Stored as bcrypt hash.",
+    )
+
+    @field_validator("new_password")
+    @classmethod
+    def password_not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Password must not be blank.")
+        return v
+
+
 class TokenPayload(BaseModel):
     """Internal representation of a decoded JWT payload."""
 

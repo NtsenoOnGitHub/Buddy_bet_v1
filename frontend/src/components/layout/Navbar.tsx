@@ -3,9 +3,10 @@ import { useAuth } from '../../auth/AuthContext'
 import { Button } from '../ui/Button'
 
 const userLinks = [
+  { to: '/matches',   label: 'Matches'   },
   { to: '/dashboard', label: 'Open Bets' },
-  { to: '/bets/my',   label: 'My Bets' },
-  { to: '/wallet',    label: 'Wallet' },
+  { to: '/bets/my',   label: 'My Bets'   },
+  { to: '/wallet',    label: 'Wallet'    },
 ]
 
 const adminLinks = [

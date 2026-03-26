@@ -21,10 +21,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.exceptions import ConflictError, UnauthorizedError
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import (
+    create_access_token,
+    create_password_reset_token,
+    hash_password,
+    verify_password,
+    verify_password_reset_token,
+)
 from app.repositories.user_repository import UserRepository
 from app.repositories.wallet_repository import WalletRepository
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
+from app.schemas.auth import (
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
+    LoginRequest,
+    RegisterRequest,
+    ResetPasswordRequest,
+    TokenResponse,
+)
 from app.schemas.user import UserResponse
 
 logger = logging.getLogger(__name__)
@@ -97,6 +110,86 @@ class AuthService:
             expires_in=settings.access_token_expire_minutes * 60,
             user=UserResponse.model_validate(user),
         )
+
+    async def forgot_password(
+        self, request: ForgotPasswordRequest
+    ) -> ForgotPasswordResponse:
+        """Generate a password-reset token for the given email address.
+
+        The response is intentionally identical whether or not the email is
+        registered, to prevent user-enumeration attacks.
+
+        In development (APP_ENV=development) the token is returned in the
+        response so the flow can be tested without an email service.
+        In production the token is only logged; replace the log call with an
+        email dispatch once a mail service is integrated.
+
+        Args:
+            request: Contains the email address to reset.
+
+        Returns:
+            ForgotPasswordResponse with a generic message and, in development
+            mode only, the raw reset token.
+        """
+        _GENERIC_MESSAGE = (
+            "If that email address is registered you will receive a reset link shortly."
+        )
+
+        normalised_email = request.email.lower().strip()
+        user = await self._user_repo.get_by_email(normalised_email)
+
+        if user is None:
+            # Return identical response — do not reveal whether the email exists.
+            logger.info("forgot_password: email not found (not disclosed): %s", normalised_email)
+            return ForgotPasswordResponse(message=_GENERIC_MESSAGE)
+
+        token = create_password_reset_token(user.id)
+
+        if settings.app_env == "development":
+            logger.info(
+                "forgot_password [DEV]: reset token for user_id=%s → %s",
+                user.id,
+                token,
+            )
+            return ForgotPasswordResponse(message=_GENERIC_MESSAGE, reset_token=token)
+
+        # Production path: token is NOT returned in the response.
+        # TODO: dispatch email with reset link to user.email using your mail service.
+        logger.info(
+            "forgot_password: reset token generated for user_id=%s "
+            "(email delivery not yet implemented — token: %s)",
+            user.id,
+            token,
+        )
+        return ForgotPasswordResponse(message=_GENERIC_MESSAGE)
+
+    async def reset_password(self, request: ResetPasswordRequest) -> None:
+        """Verify a reset token and update the user's password.
+
+        Args:
+            request: Contains the reset token and the new plain-text password.
+
+        Raises:
+            UnauthorizedError: If the token is invalid, expired, or the wrong type.
+            NotFoundError: If the user referenced by the token no longer exists.
+        """
+        # Raises UnauthorizedError for any invalid/expired token
+        user_id = verify_password_reset_token(request.token)
+
+        user = await self._user_repo.get_by_id_or_404(user_id)
+
+        new_hash = hash_password(request.new_password)
+
+        try:
+            user.password_hash = new_hash
+            self._db.add(user)
+            await self._db.flush()
+            await self._db.commit()
+        except Exception:
+            await self._db.rollback()
+            raise
+
+        logger.info("reset_password: password updated for user_id=%s", user.id)
 
     async def login(self, request: LoginRequest) -> TokenResponse:
         """Authenticate a user and return a JWT.

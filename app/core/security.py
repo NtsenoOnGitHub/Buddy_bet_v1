@@ -76,6 +76,63 @@ def create_access_token(
     return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
 
 
+def create_password_reset_token(user_id: uuid.UUID) -> str:
+    """Create a short-lived signed JWT for password reset.
+
+    The token contains a 'type: password_reset' claim so it cannot be used
+    as an access token, and vice-versa.  Expiry is controlled by the
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES setting (default 15 minutes).
+
+    Args:
+        user_id: The UUID of the user requesting the reset.
+
+    Returns:
+        A signed JWT string.
+    """
+    now = datetime.now(tz=timezone.utc)
+    expire = now + timedelta(minutes=settings.password_reset_token_expire_minutes)
+
+    payload = {
+        "sub":  str(user_id),
+        "type": "password_reset",
+        "iat":  now,
+        "exp":  expire,
+    }
+    return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
+
+
+def verify_password_reset_token(token: str) -> uuid.UUID:
+    """Decode and verify a password-reset JWT.
+
+    Raises:
+        UnauthorizedError: If the token is invalid, expired, the wrong type,
+                           or the subject is not a valid UUID.
+
+    Returns:
+        The user UUID extracted from the token's 'sub' claim.
+    """
+    try:
+        payload = jwt.decode(
+            token,
+            settings.secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+    except JWTError as exc:
+        logger.debug("Password reset token decode failed: %s", exc)
+        raise UnauthorizedError("Invalid or expired password reset token.") from exc
+
+    if payload.get("type") != "password_reset":
+        raise UnauthorizedError("Invalid token type.")
+
+    sub = payload.get("sub")
+    if not sub:
+        raise UnauthorizedError("Token missing subject claim.")
+    try:
+        return uuid.UUID(sub)
+    except ValueError as exc:
+        raise UnauthorizedError("Token subject is not a valid UUID.") from exc
+
+
 def decode_access_token(token: str) -> dict:
     """Decode and verify a JWT access token.
 

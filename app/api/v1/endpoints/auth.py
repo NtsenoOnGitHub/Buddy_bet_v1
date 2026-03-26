@@ -12,7 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user, get_db
 from app.models.user import User
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
+from app.schemas.auth import (
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
+    LoginRequest,
+    RegisterRequest,
+    ResetPasswordRequest,
+    TokenResponse,
+)
 from app.schemas.user import UserResponse
 from app.services.auth_service import AuthService
 
@@ -53,6 +60,45 @@ async def login(
 ) -> TokenResponse:
     service = AuthService(db)
     return await service.login(body)
+
+
+@router.post(
+    "/forgot-password",
+    response_model=ForgotPasswordResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Request a password reset token",
+    description=(
+        "Generates a short-lived password reset token for the given email address. "
+        "The response is identical whether or not the email is registered "
+        "(prevents user enumeration). "
+        "In development mode the token is returned directly in the response. "
+        "In production the token would be delivered via email."
+    ),
+)
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ForgotPasswordResponse:
+    service = AuthService(db)
+    return await service.forgot_password(body)
+
+
+@router.post(
+    "/reset-password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Reset password using a reset token",
+    description=(
+        "Verifies the reset token and updates the account's password. "
+        "The token must have been obtained from /auth/forgot-password "
+        "and expires after 15 minutes."
+    ),
+)
+async def reset_password(
+    body: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    service = AuthService(db)
+    await service.reset_password(body)
 
 
 @router.get(

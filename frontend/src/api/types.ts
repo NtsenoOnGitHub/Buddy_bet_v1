@@ -74,6 +74,8 @@ export interface MatchResponse {
   result_confirmed_at: string | null
   created_at: string
   updated_at: string
+  /** Computed by the backend: true when status=scheduled AND kickoff cutoff has not passed. */
+  is_betting_open: boolean
 }
 
 export interface BetResponse {

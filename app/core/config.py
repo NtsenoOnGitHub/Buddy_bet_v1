@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     secret_key: str = "INSECURE_CHANGE_ME"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
+    password_reset_token_expire_minutes: int = 15
 
     # -----------------------------------------------------------------------
     # CORS
@@ -79,6 +80,13 @@ class Settings(BaseSettings):
     max_stake_amount: Decimal = Decimal("10000.00")
     # Minutes before kickoff after which bet creation is blocked (PO-05)
     bet_creation_cutoff_minutes: int = 15
+
+    # -----------------------------------------------------------------------
+    # Development helpers
+    # -----------------------------------------------------------------------
+    # Set SEED_TEST_USER=true to auto-create a funded test user on startup.
+    # Has no effect outside development (app_env != "development").
+    seed_test_user: bool = False
 
     # -----------------------------------------------------------------------
     # Logging

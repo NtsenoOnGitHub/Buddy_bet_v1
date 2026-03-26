@@ -33,6 +33,8 @@ from app.core.exceptions import (
     ValidationError as AppValidationError,
 )
 from app.api.v1.router import api_router
+from app.db.seed import seed_matches, seed_test_user
+from app.db.session import AsyncSessionFactory
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -46,7 +48,18 @@ settings = get_settings()
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application startup and shutdown lifecycle."""
     logger.info("Buddy Bet API starting up — environment: %s", settings.app_env)
-    # Future: initialise connection pool warmup, background schedulers, etc.
+
+    if settings.app_env == "development" and settings.seed_test_user:
+        logger.info("SEED_TEST_USER=true — seeding development data …")
+        async with AsyncSessionFactory() as db:
+            try:
+                await seed_test_user(db)
+                await seed_matches(db)
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                logger.exception("seed failed — continuing startup")
+
     yield
     logger.info("Buddy Bet API shutting down.")
 
