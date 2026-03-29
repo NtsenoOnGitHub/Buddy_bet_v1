@@ -143,46 +143,68 @@ export default function WalletPage() {
                 </Link>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-800 text-left text-xs text-gray-500">
-                      <th className="pb-2 pr-4">Amount</th>
-                      <th className="pb-2 pr-4">Status</th>
-                      <th className="pb-2 pr-4">Provider</th>
-                      <th className="pb-2">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-800">
-                    {depositData.items.map((d) => (
-                      <tr key={d.id} className="text-gray-300">
-                        <td className="py-3 pr-4 font-semibold text-white">
-                          {formatMoney(d.amount, d.currency)}
-                        </td>
-                        <td className="py-3 pr-4">
-                          <Badge variant={DEPOSIT_STATUS_VARIANT[d.status]}>
-                            {DEPOSIT_STATUS_LABEL[d.status]}
-                          </Badge>
-                          {(d.status === 'processing' || d.status === 'pending') && (
-                            <Link
-                              to={`/wallet/deposit/return?deposit_id=${d.id}`}
-                              className="ml-2 text-xs text-brand-400 underline hover:text-brand-300"
-                            >
-                              Check status
-                            </Link>
-                          )}
-                        </td>
-                        <td className="py-3 pr-4 text-xs capitalize text-gray-500">
-                          {d.payment_provider ?? '—'}
-                        </td>
-                        <td className="py-3 text-xs text-gray-500">
-                          {formatDate(d.requested_at)}
-                        </td>
+              <>
+                {/* Mobile: card list */}
+                <div className="divide-y divide-gray-800 sm:hidden">
+                  {depositData.items.map((d) => (
+                    <div key={d.id} className="flex items-center justify-between py-3">
+                      <div className="space-y-1">
+                        <p className="font-semibold text-white">{formatMoney(d.amount, d.currency)}</p>
+                        <p className="text-xs text-gray-500 capitalize">{d.payment_provider ?? '—'} · {formatDate(d.requested_at)}</p>
+                        {(d.status === 'processing' || d.status === 'pending') && (
+                          <Link to={`/wallet/deposit/return?deposit_id=${d.id}`} className="text-xs text-brand-400 underline">
+                            Check status
+                          </Link>
+                        )}
+                      </div>
+                      <Badge variant={DEPOSIT_STATUS_VARIANT[d.status]}>
+                        {DEPOSIT_STATUS_LABEL[d.status]}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+                {/* Desktop: table */}
+                <div className="hidden overflow-x-auto sm:block">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-800 text-left text-xs text-gray-500">
+                        <th className="pb-2 pr-4">Amount</th>
+                        <th className="pb-2 pr-4">Status</th>
+                        <th className="pb-2 pr-4">Provider</th>
+                        <th className="pb-2">Date</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800">
+                      {depositData.items.map((d) => (
+                        <tr key={d.id} className="text-gray-300">
+                          <td className="py-3 pr-4 font-semibold text-white">
+                            {formatMoney(d.amount, d.currency)}
+                          </td>
+                          <td className="py-3 pr-4">
+                            <Badge variant={DEPOSIT_STATUS_VARIANT[d.status]}>
+                              {DEPOSIT_STATUS_LABEL[d.status]}
+                            </Badge>
+                            {(d.status === 'processing' || d.status === 'pending') && (
+                              <Link
+                                to={`/wallet/deposit/return?deposit_id=${d.id}`}
+                                className="ml-2 text-xs text-brand-400 underline hover:text-brand-300"
+                              >
+                                Check status
+                              </Link>
+                            )}
+                          </td>
+                          <td className="py-3 pr-4 text-xs capitalize text-gray-500">
+                            {d.payment_provider ?? '—'}
+                          </td>
+                          <td className="py-3 text-xs text-gray-500">
+                            {formatDate(d.requested_at)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
 
             <Pagination
@@ -214,57 +236,78 @@ export default function WalletPage() {
             {txData.items.length === 0 ? (
               <p className="text-gray-500">No transactions yet.</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-800 text-left text-xs text-gray-500">
-                      <th className="pb-2 pr-4">Type</th>
-                      <th className="pb-2 pr-4">Amount</th>
-                      <th className="pb-2 pr-4">Balance after</th>
-                      <th className="pb-2">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-800">
-                    {txData.items.map((tx) => (
-                      <tr key={tx.id} className="text-gray-300">
-                        <td className="py-3 pr-4">
-                          <div className="font-medium text-gray-100">
-                            {ENTRY_LABELS[tx.entry_type] ?? tx.entry_type}
-                          </div>
-                          {tx.notes && (
-                            <div className="mt-0.5 text-xs text-gray-500 truncate max-w-[200px]">
-                              {tx.notes}
-                            </div>
-                          )}
-                        </td>
-                        <td className="py-3 pr-4">
-                          <span
-                            className={
-                              tx.direction === 'credit'
-                                ? 'text-brand-400'
-                                : 'text-red-400'
-                            }
-                          >
-                            {tx.direction === 'credit' ? '+' : '−'}
-                            {formatMoney(tx.amount, wallet?.currency)}
-                          </span>
-                        </td>
-                        <td className="py-3 pr-4 text-gray-400">
+              <>
+                {/* Mobile: card list */}
+                <div className="divide-y divide-gray-800 sm:hidden">
+                  {txData.items.map((tx) => (
+                    <div key={tx.id} className="flex items-start justify-between py-3">
+                      <div className="space-y-0.5">
+                        <p className="text-sm font-medium text-gray-100">
+                          {ENTRY_LABELS[tx.entry_type] ?? tx.entry_type}
+                        </p>
+                        {tx.notes && (
+                          <p className="max-w-[180px] truncate text-xs text-gray-500">{tx.notes}</p>
+                        )}
+                        <p className="text-xs text-gray-500">{formatDate(tx.created_at)}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className={tx.direction === 'credit' ? 'font-semibold text-brand-400' : 'font-semibold text-red-400'}>
+                          {tx.direction === 'credit' ? '+' : '−'}{formatMoney(tx.amount, wallet?.currency)}
+                        </p>
+                        <p className="text-xs text-gray-500">
                           {tx.balance_field === 'available'
                             ? formatMoney(tx.available_balance_after, wallet?.currency)
                             : formatMoney(tx.locked_balance_after, wallet?.currency)}
-                          <span className="ml-1 text-xs text-gray-600">
-                            {tx.balance_field}
-                          </span>
-                        </td>
-                        <td className="py-3 text-xs text-gray-500">
-                          {formatDate(tx.created_at)}
-                        </td>
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {/* Desktop: table */}
+                <div className="hidden overflow-x-auto sm:block">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-800 text-left text-xs text-gray-500">
+                        <th className="pb-2 pr-4">Type</th>
+                        <th className="pb-2 pr-4">Amount</th>
+                        <th className="pb-2 pr-4">Balance after</th>
+                        <th className="pb-2">Date</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800">
+                      {txData.items.map((tx) => (
+                        <tr key={tx.id} className="text-gray-300">
+                          <td className="py-3 pr-4">
+                            <div className="font-medium text-gray-100">
+                              {ENTRY_LABELS[tx.entry_type] ?? tx.entry_type}
+                            </div>
+                            {tx.notes && (
+                              <div className="mt-0.5 max-w-[200px] truncate text-xs text-gray-500">
+                                {tx.notes}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-3 pr-4">
+                            <span className={tx.direction === 'credit' ? 'text-brand-400' : 'text-red-400'}>
+                              {tx.direction === 'credit' ? '+' : '−'}
+                              {formatMoney(tx.amount, wallet?.currency)}
+                            </span>
+                          </td>
+                          <td className="py-3 pr-4 text-gray-400">
+                            {tx.balance_field === 'available'
+                              ? formatMoney(tx.available_balance_after, wallet?.currency)
+                              : formatMoney(tx.locked_balance_after, wallet?.currency)}
+                            <span className="ml-1 text-xs text-gray-600">{tx.balance_field}</span>
+                          </td>
+                          <td className="py-3 text-xs text-gray-500">
+                            {formatDate(tx.created_at)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
 
             <Pagination
