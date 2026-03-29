@@ -6,13 +6,14 @@ The Settings object is a singleton — use get_settings() everywhere.
 
 from __future__ import annotations
 
+import json
 import logging
 import ssl
 from decimal import Decimal
 from functools import lru_cache
 from typing import List
 
-from pydantic import field_validator, computed_field, model_validator
+from pydantic import field_validator, computed_field, model_validator, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -67,14 +68,25 @@ class Settings(BaseSettings):
     # -----------------------------------------------------------------------
     # CORS
     # -----------------------------------------------------------------------
-    cors_origins: List[str] = ["http://localhost:3000", "http://localhost:5173"]
+    # Accepts JSON array ("["url1","url2"]") or comma-separated ("url1,url2").
+    # Stored as a raw string so pydantic_settings never attempts json.loads().
+    cors_origins_raw: str = Field(
+        default="http://localhost:3000,http://localhost:5173",
+        validation_alias="cors_origins",
+    )
 
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def parse_cors_origins(cls, v: object) -> List[str]:
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return v  # type: ignore[return-value]
+    @computed_field  # type: ignore[misc]
+    @property
+    def cors_origins(self) -> List[str]:
+        v = self.cors_origins_raw
+        stripped = v.strip()
+        if stripped.startswith("["):
+            try:
+                parsed = json.loads(stripped)
+                return [str(o).strip() for o in parsed if str(o).strip()]
+            except json.JSONDecodeError:
+                pass
+        return [o.strip() for o in stripped.split(",") if o.strip()]
 
     # -----------------------------------------------------------------------
     # Platform constants
@@ -106,7 +118,11 @@ class Settings(BaseSettings):
     # Leagues to track (comma-separated IDs or Python list).
     # Defaults: Premier League(39), La Liga(140), Bundesliga(78),
     #           Serie A(135), Ligue 1(61), UEFA Champions League(2).
-    sports_provider_league_ids: List[int] = [39, 140, 78, 135, 61, 2]
+    # Accepts JSON array ("[39,140]") or comma-separated ("39,140").
+    league_ids_raw: str = Field(
+        default="39,140,78,135,61,2",
+        validation_alias="sports_provider_league_ids",
+    )
     # How many calendar days ahead to fetch upcoming fixtures
     sports_provider_sync_days_ahead: int = 7
     # How many calendar days back to fetch recent results
@@ -114,12 +130,18 @@ class Settings(BaseSettings):
     # HTTP request timeout (seconds)
     sports_provider_timeout_seconds: int = 30
 
-    @field_validator("sports_provider_league_ids", mode="before")
-    @classmethod
-    def parse_league_ids(cls, v: object) -> List[int]:
-        if isinstance(v, str):
-            return [int(i.strip()) for i in v.split(",") if i.strip()]
-        return v  # type: ignore[return-value]
+    @computed_field  # type: ignore[misc]
+    @property
+    def sports_provider_league_ids(self) -> List[int]:
+        v = self.league_ids_raw
+        stripped = v.strip()
+        if stripped.startswith("["):
+            try:
+                parsed = json.loads(stripped)
+                return [int(i) for i in parsed]
+            except (json.JSONDecodeError, ValueError):
+                pass
+        return [int(i.strip()) for i in stripped.split(",") if i.strip()]
 
     # -----------------------------------------------------------------------
     # PayFast payment gateway
