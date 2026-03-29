@@ -35,7 +35,7 @@ export const tokenStore = {
 
 // ── Base client ──────────────────────────────────────────────────────────────
 
-const BASE = import.meta.env.VITE_API_BASE_URL ?? ''
+const BASE = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 
 async function request<T>(
   method: string,
