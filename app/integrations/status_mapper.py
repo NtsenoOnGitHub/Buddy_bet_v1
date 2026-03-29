@@ -99,3 +99,32 @@ def derive_outcome(
 def is_completed_api_football_status(raw_status: str) -> bool:
     """Return ``True`` when the API-Football status signals a final score is available."""
     return raw_status.strip().upper() in _API_FOOTBALL_COMPLETED_STATUSES
+
+
+# ---------------------------------------------------------------------------
+# Football-Data.org  (api.football-data.org/v4)
+# Status docs: https://www.football-data.org/documentation/quickstart
+# ---------------------------------------------------------------------------
+
+_FOOTBALL_DATA_ORG_STATUS_MAP: dict[str, MatchStatus] = {
+    "SCHEDULED": MatchStatus.scheduled,
+    "TIMED": MatchStatus.scheduled,
+    "IN_PLAY": MatchStatus.live,
+    "PAUSED": MatchStatus.live,       # Half-time pause
+    "FINISHED": MatchStatus.completed,
+    "POSTPONED": MatchStatus.postponed,
+    "SUSPENDED": MatchStatus.abandoned,
+    "CANCELLED": MatchStatus.cancelled,
+}
+
+_FOOTBALL_DATA_ORG_COMPLETED_STATUSES: frozenset[str] = frozenset({"FINISHED"})
+
+
+def map_football_data_org_status(raw_status: str) -> MatchStatus:
+    """Map a Football-Data.org status string to an internal :class:`MatchStatus`."""
+    return _FOOTBALL_DATA_ORG_STATUS_MAP.get(raw_status.strip().upper(), MatchStatus.scheduled)
+
+
+def is_completed_football_data_org_status(raw_status: str) -> bool:
+    """Return ``True`` when Football-Data.org status signals a final score is available."""
+    return raw_status.strip().upper() in _FOOTBALL_DATA_ORG_COMPLETED_STATUSES

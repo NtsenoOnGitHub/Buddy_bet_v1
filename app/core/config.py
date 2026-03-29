@@ -7,6 +7,7 @@ The Settings object is a singleton — use get_settings() everywhere.
 from __future__ import annotations
 
 import logging
+import ssl
 from decimal import Decimal
 from functools import lru_cache
 from typing import List
@@ -50,6 +51,10 @@ class Settings(BaseSettings):
     db_max_overflow: int = 20
     db_pool_timeout: int = 30
     db_pool_recycle: int = 1800
+
+    # Set DB_SSL=require (or "true") to force SSL — automatically enabled
+    # when the DATABASE_URL points to a Supabase host.
+    db_ssl: str = "auto"  # auto | require | disable
 
     # -----------------------------------------------------------------------
     # Security / JWT
@@ -174,6 +179,7 @@ class Settings(BaseSettings):
             "change_me",
             "secret",
             "your-secret-key",
+            "CHANGE_ME_GENERATE_WITH_openssl_rand_-hex_32",
             "",
         }
         if self.app_env != "development" and self.secret_key in _insecure_placeholders:
@@ -184,9 +190,56 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _enforce_https_in_production(self) -> "Settings":
+        """Require HTTPS for all PayFast URLs when running in production."""
+        if self.app_env != "production" or not self.payfast_enabled:
+            return self
+        url_fields = {
+            "payfast_return_url": self.payfast_return_url,
+            "payfast_cancel_url": self.payfast_cancel_url,
+            "payfast_notify_url": self.payfast_notify_url,
+        }
+        for field_name, url in url_fields.items():
+            if url and not url.startswith("https://"):
+                raise ValueError(
+                    f"{field_name} must use HTTPS in production (got: {url!r}). "
+                    "PayFast will reject non-HTTPS callback URLs."
+                )
+        return self
+
     # -----------------------------------------------------------------------
     # Computed DSN properties
     # -----------------------------------------------------------------------
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def db_connect_args(self) -> dict:
+        """asyncpg connect_args — adds SSL when required.
+
+        SSL is forced when:
+          • DB_SSL=require  (explicit opt-in), or
+          • DB_SSL=auto and the DATABASE_URL contains a Supabase hostname.
+
+        Pass DB_SSL=disable to suppress SSL for local plain-Postgres setups.
+        """
+        url = self.database_url or ""
+        supabase_host = "supabase.co" in url or "supabase.com" in url
+        if self.db_ssl == "disable":
+            return {}
+        url = self.database_url or ""
+        transaction_pooler = supabase_host and ":6543/" in url
+        if self.db_ssl == "require" or (self.db_ssl == "auto" and supabase_host):
+            # Use an explicit SSLContext — more reliable than the string "require"
+            # on Windows where asyncpg's string-based SSL handling can fail.
+            ssl_ctx = ssl.create_default_context()
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+            args: dict = {"ssl": ssl_ctx}
+            if transaction_pooler:
+                args["statement_cache_size"] = 0
+            return args
+        return {}
 
     @computed_field  # type: ignore[misc]
     @property

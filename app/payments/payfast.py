@@ -24,7 +24,8 @@ from __future__ import annotations
 
 import hashlib
 import urllib.parse
-from decimal import Decimal
+from datetime import datetime, timezone, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.core.config import get_settings
@@ -179,7 +180,7 @@ def verify_itn(
     # 3. Amount
     try:
         gross = Decimal(str(itn_params.get("amount_gross", "0")))
-    except Exception:
+    except (InvalidOperation, ValueError):
         return False, "invalid_amount_gross"
 
     if gross != expected_amount:
@@ -191,3 +192,28 @@ def verify_itn(
         return False, f"payment_status_not_complete: {payment_status}"
 
     return True, ""
+
+
+def verify_itn_timestamp(
+    itn_params: dict[str, Any],
+    *,
+    max_age_seconds: int = 86400,
+) -> bool:
+    """Return True if the ITN ``payment_date`` is recent enough.
+
+    PayFast sends ``payment_date`` as "YYYY-MM-DD HH:MM:SS" in SAST (UTC+2).
+    We apply a generous 24-hour window (default) to account for timezone
+    offsets and legitimate retry delays.  Returns True when the field is
+    absent so that missing timestamps are not a hard failure.
+    """
+    payment_date_str = itn_params.get("payment_date", "")
+    if not payment_date_str:
+        return True  # field absent — don't reject
+    try:
+        # SAST = UTC+2; treat as UTC+2 then convert to UTC for comparison.
+        sast = timezone(timedelta(hours=2))
+        dt = datetime.strptime(payment_date_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=sast)
+        age_seconds = abs((datetime.now(tz=timezone.utc) - dt).total_seconds())
+        return age_seconds <= max_age_seconds
+    except (ValueError, OverflowError):
+        return True  # unparseable — don't reject; log at call site

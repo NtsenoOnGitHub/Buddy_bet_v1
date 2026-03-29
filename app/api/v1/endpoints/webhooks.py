@@ -32,7 +32,7 @@ from app.core.config import get_settings
 from app.core.dependencies import get_db
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.enums import DepositStatus
-from app.payments.payfast import verify_itn, verify_itn_signature
+from app.payments.payfast import verify_itn, verify_itn_signature, verify_itn_timestamp
 from app.repositories.deposit_repository import DepositRepository
 from app.services.deposit_service import DepositService
 
@@ -99,7 +99,16 @@ async def payfast_itn(
         logger.warning("payfast_itn: unknown deposit_id=%s — ignoring", deposit_id)
         return "OK"
 
-    # --- 3. Verify signature + merchant_id (all ITNs) ------------------------
+    # --- 3a. Timestamp check (replay attack mitigation) ----------------------
+    if not verify_itn_timestamp(itn):
+        logger.warning(
+            "payfast_itn: stale ITN rejected deposit=%s payment_date=%s",
+            deposit_id,
+            itn.get("payment_date"),
+        )
+        return "OK"
+
+    # --- 3b. Verify signature + merchant_id (all ITNs) -----------------------
     # For COMPLETE ITNs we also verify amount_gross.
     # verify_itn() checks payment_status == "COMPLETE" internally, so we use
     # it only for COMPLETE; for CANCELLED/FAILED we verify sig + merchant only.
