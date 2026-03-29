@@ -19,6 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.dependencies import get_current_admin, get_db
 from app.integrations.providers.api_football import ApiFootballProvider
+from app.integrations.providers.football_data_org import FootballDataOrgProvider
+from app.integrations.providers.base import BaseSportsProvider
 from app.integrations.sync_service import MatchSyncService
 from app.models.user import User
 from app.schemas.sync import SyncRequest, SyncResultResponse
@@ -26,6 +28,13 @@ from app.schemas.sync import SyncRequest, SyncResultResponse
 logger = logging.getLogger(__name__)
 router = APIRouter()
 settings = get_settings()
+
+
+def _get_provider() -> BaseSportsProvider:
+    """Return the configured sports provider instance."""
+    if settings.sports_provider == "football_data_org":
+        return FootballDataOrgProvider()
+    return ApiFootballProvider()
 
 
 def _require_provider_enabled() -> None:
@@ -64,7 +73,7 @@ async def sync_upcoming(
     days_ahead = body.days_ahead or settings.sports_provider_sync_days_ahead
     league_ids = body.league_ids  # None = use provider/config defaults
 
-    async with ApiFootballProvider() as provider:
+    async with _get_provider() as provider:
         svc = MatchSyncService(db, provider)
         result = await svc.sync_upcoming(
             days_ahead=days_ahead, league_ids=league_ids
@@ -104,7 +113,7 @@ async def sync_results(
     days_back = body.days_back or settings.sports_provider_sync_days_back
     league_ids = body.league_ids
 
-    async with ApiFootballProvider() as provider:
+    async with _get_provider() as provider:
         svc = MatchSyncService(db, provider)
         result = await svc.sync_results(
             days_back=days_back, league_ids=league_ids
@@ -141,7 +150,7 @@ async def sync_live(
 
     league_ids = body.league_ids
 
-    async with ApiFootballProvider() as provider:
+    async with _get_provider() as provider:
         svc = MatchSyncService(db, provider)
         result = await svc.sync_live(league_ids=league_ids)
 

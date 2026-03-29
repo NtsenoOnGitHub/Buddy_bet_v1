@@ -39,7 +39,7 @@ class CreateBetRequest(BaseModel):
             raise ValueError("stake_amount must be a valid decimal number.")
         if amount <= Decimal("0"):
             raise ValueError("stake_amount must be greater than zero.")
-        return v
+        return amount
 
 
 class AcceptBetRequest(BaseModel):

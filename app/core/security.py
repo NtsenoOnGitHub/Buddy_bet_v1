@@ -10,7 +10,9 @@ JWT payload schema:
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -30,6 +32,11 @@ settings = get_settings()
 
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# Pre-computed bcrypt hash of a dummy string — used in the not-found login
+# path so the response time is indistinguishable from a real wrong-password
+# attempt, preventing user-enumeration via timing.
+_DUMMY_HASH: str = _pwd_context.hash("__dummy_timing_guard__")
+
 
 def hash_password(plain_password: str) -> str:
     """Return a bcrypt hash of the given plain-text password."""
@@ -39,6 +46,53 @@ def hash_password(plain_password: str) -> str:
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Return True if the plain password matches the stored hash."""
     return _pwd_context.verify(plain_password, hashed_password)
+
+
+# ---------------------------------------------------------------------------
+# Login attempt tracker (brute-force / lockout)
+# ---------------------------------------------------------------------------
+
+class LoginAttemptTracker:
+    """In-memory tracker for failed login attempts with rolling-window lockout.
+
+    Limitations: state is per-process. For multi-instance deployments replace
+    this with a Redis-backed implementation.
+    """
+
+    MAX_ATTEMPTS: int = 5
+    WINDOW_SECONDS: int = 900  # 15-minute rolling window
+
+    def __init__(self) -> None:
+        self._attempts: dict[str, list[float]] = {}
+        self._lock = asyncio.Lock()
+
+    def _prune(self, email: str, now: float) -> list[float]:
+        """Return only attempts within the current window (mutates in place)."""
+        recent = [t for t in self._attempts.get(email, []) if now - t < self.WINDOW_SECONDS]
+        self._attempts[email] = recent
+        return recent
+
+    async def is_locked(self, email: str) -> bool:
+        """Return True if the email has exceeded the failure threshold."""
+        async with self._lock:
+            recent = self._prune(email, time.monotonic())
+            return len(recent) >= self.MAX_ATTEMPTS
+
+    async def record_failure(self, email: str) -> None:
+        """Record a failed login attempt."""
+        async with self._lock:
+            now = time.monotonic()
+            self._prune(email, now)
+            self._attempts[email].append(now)
+
+    async def clear(self, email: str) -> None:
+        """Clear failed attempts after a successful login."""
+        async with self._lock:
+            self._attempts.pop(email, None)
+
+
+# Module-level singleton — imported by auth_service.
+login_attempt_tracker = LoginAttemptTracker()
 
 
 # ---------------------------------------------------------------------------

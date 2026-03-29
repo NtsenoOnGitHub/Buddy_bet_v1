@@ -25,9 +25,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.exceptions import ConflictError, UnauthorizedError
 from app.core.security import (
+    _DUMMY_HASH,
     create_access_token,
     create_password_reset_token,
     hash_password,
+    login_attempt_tracker,
     verify_password,
     verify_password_reset_token,
 )
@@ -199,13 +201,28 @@ class AuthService:
             UnauthorizedError: If credentials are invalid (intentionally vague).
         """
         normalised_email = request.email.lower().strip()
+
+        # Reject immediately if the account is temporarily locked.
+        if await login_attempt_tracker.is_locked(normalised_email):
+            raise UnauthorizedError(
+                "Too many failed login attempts. Please try again in 15 minutes."
+            )
+
         user = await self._user_repo.get_by_email(normalised_email)
 
-        # Use a constant-time comparison path even for not-found case to
-        # prevent email enumeration via timing.
-        if user is None or not verify_password(request.password, user.password_hash):
+        # Always call verify_password — even when the user doesn't exist — so
+        # that response timing is identical regardless of whether the email is
+        # registered, preventing user-enumeration via timing side-channels.
+        if user is None:
+            verify_password(request.password, _DUMMY_HASH)
+            await login_attempt_tracker.record_failure(normalised_email)
             raise UnauthorizedError("Invalid email or password.")
 
+        if not verify_password(request.password, user.password_hash):
+            await login_attempt_tracker.record_failure(normalised_email)
+            raise UnauthorizedError("Invalid email or password.")
+
+        await login_attempt_tracker.clear(normalised_email)
         logger.info("User logged in: id=%s email=%s", user.id, user.email)
 
         token = create_access_token(

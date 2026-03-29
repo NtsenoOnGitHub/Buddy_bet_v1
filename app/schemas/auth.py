@@ -34,6 +34,13 @@ class RegisterRequest(BaseModel):
         description="Optional phone number.",
     )
 
+    @field_validator("display_name")
+    @classmethod
+    def display_name_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Display name must not be blank or whitespace only.")
+        return v
+
     @field_validator("password")
     @classmethod
     def password_not_empty(cls, v: str) -> str:
