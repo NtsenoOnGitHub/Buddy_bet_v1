@@ -160,7 +160,7 @@ export default function AdminConfirmResultPage() {
 
   const { data: matchData, isLoading: matchesLoading } = useQuery({
     queryKey: ['matches', 'all'],
-    queryFn: () => matchesApi.list(1, 100),
+    queryFn: () => matchesApi.list({ page: 1, pageSize: 100 }),
   })
 
   const {

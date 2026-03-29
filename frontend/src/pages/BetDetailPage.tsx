@@ -146,7 +146,7 @@ export default function BetDetailPage() {
           </span>
         </CardHeader>
 
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
           <div>
             <dt className="text-gray-500">Stake</dt>
             <dd className="font-semibold text-brand-400">
@@ -208,7 +208,7 @@ export default function BetDetailPage() {
             </div>
           )}
 
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+          <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
             <div>
               <dt className="text-gray-500">Outcome</dt>
               <dd className="font-medium text-gray-200">

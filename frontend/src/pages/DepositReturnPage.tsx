@@ -13,7 +13,7 @@
  * invite the user to refresh manually.
  */
 import { useEffect, useRef, useState } from 'react'
-import { useSearchParams, useNavigate, Link } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { depositsApi } from '../api/deposits'
 import type { DepositResponse, DepositStatus } from '../api/types'
 import { Card } from '../components/ui/Card'

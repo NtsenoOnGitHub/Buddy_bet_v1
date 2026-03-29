@@ -31,7 +31,7 @@ export function BetCard({ bet, showAccept = false }: BetCardProps) {
     >
       {/* Match header */}
       <div className="mb-3 flex items-start justify-between gap-2">
-        <div>
+        <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-white">
             {bet.match.home_team} vs {bet.match.away_team}
           </p>
@@ -42,8 +42,8 @@ export function BetCard({ bet, showAccept = false }: BetCardProps) {
         <BetStatusBadge status={bet.status} />
       </div>
 
-      {/* Stake + predictions */}
-      <div className="flex items-center gap-4 text-sm">
+      {/* Stake + predictions — 2-col grid on mobile, row on sm+ */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:flex sm:items-center sm:gap-4">
         <div>
           <p className="text-xs text-gray-500">Stake</p>
           <p className="font-semibold text-brand-400">
