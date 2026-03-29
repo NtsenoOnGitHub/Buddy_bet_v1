@@ -82,7 +82,7 @@ export default function MatchesPage() {
       </div>
 
       {/* Filters */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         {/* Status tabs */}
         <div className="flex rounded-lg border border-gray-700 bg-gray-800 p-0.5">
           {STATUS_TABS.map(({ id, label }) => (
@@ -90,7 +90,7 @@ export default function MatchesPage() {
               key={id}
               onClick={() => handleTabChange(id)}
               className={[
-                'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                'flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
                 activeTab === id
                   ? 'bg-brand-500 text-white'
                   : 'text-gray-400 hover:text-white',
@@ -108,7 +108,7 @@ export default function MatchesPage() {
             value={competitionInput}
             onChange={(e) => setCompetitionInput(e.target.value)}
             placeholder="Filter by competition…"
-            className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-100 placeholder-gray-500 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+            className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-100 placeholder-gray-500 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:flex-none"
           />
           {appliedCompetition ? (
             <Button type="button" variant="ghost" size="sm" onClick={clearCompetitionFilter}>
