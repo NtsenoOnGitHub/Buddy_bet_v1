@@ -18,10 +18,13 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import get_settings
+from app.core.rate_limit import limiter
 from app.core.exceptions import (
     AppException,
     NotFoundError,
@@ -79,6 +82,28 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add OWASP-recommended security headers to every response."""
+
+    # Swagger / ReDoc pages need to load scripts and make fetch calls —
+    # skip the strict CSP on these paths so the docs UI keeps working.
+    _DOCS_PATHS = {"/docs", "/redoc", "/openapi.json"}
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        if request.url.path not in self._DOCS_PATHS:
+            response.headers["Content-Security-Policy"] = "default-src 'none'"
+        if settings.app_env == "production":
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains; preload"
+            )
+        return response
+
+
 # ---------------------------------------------------------------------------
 # Application factory
 # ---------------------------------------------------------------------------
@@ -98,15 +123,26 @@ def create_app() -> FastAPI:
     )
 
     # -----------------------------------------------------------------------
+    # Rate limiting
+    # -----------------------------------------------------------------------
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+
+    # -----------------------------------------------------------------------
     # CORS
     # -----------------------------------------------------------------------
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
     )
+
+    # -----------------------------------------------------------------------
+    # Security headers
+    # -----------------------------------------------------------------------
+    app.add_middleware(SecurityHeadersMiddleware)
 
     # -----------------------------------------------------------------------
     # Request ID

@@ -7,10 +7,11 @@ GET  /auth/me       — return the current authenticated user's profile.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user, get_db
+from app.core.rate_limit import limiter
 from app.models.user import User
 from app.schemas.auth import (
     ForgotPasswordRequest,
@@ -36,7 +37,9 @@ router = APIRouter()
         "and returns a JWT access token together with the created user profile."
     ),
 )
+@limiter.limit("10/minute")
 async def register(
+    request: Request,
     body: RegisterRequest,
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
@@ -54,7 +57,9 @@ async def register(
         "with the authenticated user profile on success."
     ),
 )
+@limiter.limit("5/minute")
 async def login(
+    request: Request,
     body: LoginRequest,
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
@@ -75,7 +80,9 @@ async def login(
         "In production the token would be delivered via email."
     ),
 )
+@limiter.limit("3/minute")
 async def forgot_password(
+    request: Request,
     body: ForgotPasswordRequest,
     db: AsyncSession = Depends(get_db),
 ) -> ForgotPasswordResponse:
